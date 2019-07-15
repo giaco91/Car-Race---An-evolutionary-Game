@@ -9,6 +9,7 @@ from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw
 import PIL
 import numpy as np
 import random
+import pickle
 
 import matplotlib.pyplot as plt
 
@@ -28,6 +29,8 @@ class Game():
 		self.orientations=[]
 		self.backward=[]
 		self.scores=np.zeros(self.n_cars)
+		self.max_frames=0
+		self.winner_car=None
 		for nc in range(self.n_cars):
 			self.positions.append([np.array([0.5,0])])
 			self.orientations.append([np.array([1,0])])
@@ -35,6 +38,7 @@ class Game():
 
 	def max_distance_race(self):
 		print('simulate race...')
+		self.max_frames=self.n_iter
 		for nc in range(self.n_cars):
 			c_rot=np.zeros(2)
 			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
@@ -91,11 +95,13 @@ class Game():
 					else:
 						self.orientations[nc].append(abs_orientation)
 			self.car_list[nc].v=0
+			self.winner_car=np.argmax(scores)
 
 
-	def max_rounds_race(self):
+	def max_rounds_race(self,c_weight=0.5):
 		print('simulate race...')
 		for nc in range(self.n_cars):
+			last_c=0
 			c_rot=np.zeros(2)
 			checkpoint_counter=0#first argument is current round, second is the current checkpoint
 			delta=0
@@ -103,19 +109,20 @@ class Game():
 			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
 			crash=False
 			for ni in range(self.n_iter):
-				#----sensing the environment-----
-				inputs=self.get_inputs(nc)
-				#----decide for action
-				a=self.car_list[nc].get_a(inputs)
-				if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
-					# print('v_max reached: '+str(self.car_list[nc].v))
-					a=0
 				if crash:
 					self.positions[nc].append(self.positions[nc][-1])
 					self.orientations[nc].append(self.orientations[nc][-1])
 					self.backward[nc].append(self.backward[nc][-1])
 				else:
-					c=self.car_list[nc].get_c(inputs)
+					#----sensing the environment-----
+					inputs=self.get_inputs(nc)
+					#----decide for action
+					a=self.car_list[nc].get_a(inputs)
+					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
+					# print('v_max reached: '+str(self.car_list[nc].v))
+						a=0
+					c=c_weight*self.car_list[nc].get_c(inputs)+(1-c_weight)*last_c
+					last_c=c
 					c_rot[0]=-self.orientations[nc][-1][1]
 					c_rot[1]=self.orientations[nc][-1][0]
 
@@ -131,6 +138,8 @@ class Game():
 					t_p=min(t_p1,t_p2)
 					if t_p<(norm_ds+smalled_car_size)/norm_ds:
 						crash=True
+						if ni+1>self.max_frames:
+							self.max_frames=ni+1
 						self.car_list[nc].v=0
 						t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
 						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
@@ -157,8 +166,11 @@ class Game():
 						checkpoint_counter+=1
 					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
 						checkpoint_counter-=1
-			self.scores[nc]=checkpoint_counter+delta
+			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
+			if self.max_frames==0:
+				self.max_frames=self.n_iter
+			self.winner_car=np.argmax(self.scores)
 
 	def get_inputs(self,nc):
 		inputs=np.zeros(self.car_list[nc].n_inputs)
@@ -184,7 +196,7 @@ class Game():
 		for c in range(self.n_checkpoints):
 			d[c]=np.linalg.norm(self.positions[nc][-1]-self.map.skeleton[c])
 		sorted_idx=np.argsort(d)
-		if sorted_idx[0]>sorted_idx[1]:
+		if sorted_idx[0]==np.mod(sorted_idx[1]+1,self.n_checkpoints):
 			delta=-d[sorted_idx[0]]
 		else:
 			delta=d[sorted_idx[0]]
@@ -197,11 +209,15 @@ class Game():
 		_,_,map_im=self.map.draw_map(imsize=imsize,show=False,border_frac=self.border_frac)
 		scale=imsize/(self.map.size-1)
 		border=int(scale/self.border_frac)
-		for ni in range(self.n_iter):
+		for ni in range(self.max_frames):
 			pil_f=map_im.copy()
 			for nc in range(self.n_cars):
 				sc=scale*self.positions[nc][ni]+border
-				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(self.car_list[nc].size*scale),path='cars/car_'+str(self.car_list[nc].model)+'.png')
+				if self.winner_car==nc:
+					winner_car=True
+				else:
+					winner_car=False
+				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(self.car_list[nc].size*scale),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car)
 			frames.append(reflect_y_axis(pil_f))
 		print(len(frames))
 		frames[0].save(path,
@@ -210,8 +226,10 @@ class Game():
 		               duration=10*self.dt/0.01,
 		               loop=0)
 
-	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_2.png',size_car=16):
-		car_im = Image.open(path)
+	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_2.png',size_car=16,winner_car=False):
+		winner_weight=0.8
+		car_im = Image.open(path).convert('RGB')
+		map_im=map_im.convert('RGB')
 		phi=np.arctan(orientation[0]/(orientation[1]+1e-10))*360/(2*np.pi)+180#need to add 180 because show() has y-coordinate southwards
 		if orientation[1]<0:
 			phi+=180
@@ -223,18 +241,24 @@ class Game():
 		h_2=int(h/2)
 		car_im_px=car_im.load()
 		map_im_px=map_im.load()
+		winner_idx=np.zeros(4)
 		for i in range(w):
 			for j in range(h):
 				sp=car_im_px[i,j][0]+car_im_px[i,j][1]+car_im_px[i,j][2]
 				idx_w=int(position[0])-w_2+i
 				idx_h=int(position[1])-h_2+j
+				if winner_car:
+					if i==0 or i==w-1 or j==0 or j==h-1:
+						map_im_px[idx_w,idx_h]=(255,200,0)
 				if 10<sp<750 and 0<=idx_w<W and 0<=idx_h<H:
-					map_im_px[idx_w,idx_h]=car_im_px[i,j]
+					if winner_car:
+						map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,255,0])).astype(int))
+					else:
+						map_im_px[idx_w,idx_h]=car_im_px[i,j]
 		return map_im
 
 	def selection_and_mutation(self,N_sel,N_mut):
 		print('selection and mutation ....')
-		print(self.scores)
 		sorted_idx=np.argsort(self.scores)
 		print('Best score: '+str(self.scores[sorted_idx[-1]]))
 		selected_cars=[]
@@ -243,6 +267,10 @@ class Game():
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
 			mutation_rate.append(1+100/(1+self.scores[sorted_idx[-1-i]]))
+
+		with open('best_cars/best_car_map.pkl', 'wb') as f:
+			pickle.dump(selected_cars[0], f )	
+
 		if N_sel>=self.n_cars:
 			print('Not enough cars! No selection!')
 		mutated_cars.append(selected_cars[0])
@@ -266,7 +294,7 @@ class Car():
 		self.v_max=v_max
 		self.n_inputs=6
 		self.n_h=3
-		self.grip=grip#larger than zero, zero is maximum grip...
+		self.grip=grip#smaller or equal zero. zero is perfect grip. -1 is not good grip
 		self.backward=backward#the capability to drive backward compared to forward
 		self.a_weights=np.random.rand(self.n_h+1)-0.5
 		self.c_weights=(np.random.rand(self.n_h+1)-0.5)
@@ -304,7 +332,7 @@ class Car():
 		s=self.c_weights[0]
 		for i in range(self.n_h):
 			s+=self.c_weights[i+1]*h[i]
-		return sigmoid(s,bias=-0.5)*(abs(self.v)**self.grip)
+		return sigmoid(s,bias=-0.5)*abs(self.v)*np.exp(abs(self.v)*self.grip)
 
 
 #----MAP-------
@@ -416,7 +444,7 @@ class Map():
     	coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
     	ccb1=[tuple(scale*c+border for c in t) for t in cb1]
     	ccb2=[tuple(scale*c+border for c in t) for t in cb2]
-    	draw.line(coordinates,fill=(150,150,150),width=int(2*border))
+    	draw.line(coordinates,fill=(190,190,190),width=int(2*border))
     	draw.line(ccb1,fill=(200,0,50),width=width)
     	draw.line(ccb2,fill=(200,0,50),width=width)
     	if show:
