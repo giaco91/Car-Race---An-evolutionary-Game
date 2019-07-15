@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import sys
+from copy import deepcopy
 
 import numpy as np
 from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw
@@ -12,76 +13,208 @@ import random
 import matplotlib.pyplot as plt
 
 random.seed(0)
-np.random.seed(0)
+np.random.seed(7)
 
 class Game():
-	def __init__(self,race_map,car,n_iter=50,dt=0.01,border_frac=3):
+	def __init__(self,race_map,car_list,n_iter=50,dt=0.01,border_frac=3):
 		self.map=race_map
-		self.car=car
+		self.n_checkpoints=len(self.map.skeleton)-1
+		self.n_cars=len(car_list)
+		self.car_list=car_list
 		self.n_iter=n_iter
-		self.positions=[]
-		self.positions.append(np.array([0.1,0]))
-		self.orientations=[]
-		self.orientations.append(np.array([1,0]))
 		self.dt=dt
 		self.border_frac=border_frac
+		self.positions=[]
+		self.orientations=[]
+		self.backward=[]
+		self.scores=np.zeros(self.n_cars)
+		for nc in range(self.n_cars):
+			self.positions.append([np.array([0.5,0])])
+			self.orientations.append([np.array([1,0])])
+			self.backward.append([False])
 
-	def simple_race(self):
-		c_rot=np.zeros(2)
-		no_crash=True
-		i=0
-		smalled_car_size=0.9*self.car.size#kosmetik
-		while i<self.n_iter and no_crash:
-		#for i in range(self.n_iter):
-			a=self.car.get_a(np.array([0,0,0,0]))
-			if (self.car.v>self.car.v_max and a>0) or self.car.v<-self.car.v_max and a<0:
-				#print('v_max reached: '+str(self.car.v))
-				a=0
-			c=self.car.get_c(np.array([0,0,0,0]))
-			c_rot[0]=-self.orientations[-1][1]
-			c_rot[1]=self.orientations[-1][0]
-			ds=self.orientations[-1]*self.dt*self.car.v
-			ds+=c_rot*c*np.linalg.norm(ds)
-			ds+=self.orientations[-1]*0.5*a*self.dt**2
-			norm_ds=np.linalg.norm(ds)
-			t_p1,_=self.map.closest_intersection(self.positions[-1],ds,self.map.border1)
-			t_p2,_=self.map.closest_intersection(self.positions[-1],ds,self.map.border2)
-			t_p=min(t_p1,t_p2)
-			# t_p,_=self.map.closest_intersection(self.positions[-1],ds,self.map.skeleton)
-			if t_p<(norm_ds+smalled_car_size)/norm_ds:
-				print('crash!')
-				#no_crash=False
-				self.car.v=0
-				t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
-				self.positions.append(self.positions[-1]+t_crash*ds)
-			else:
-				self.car.v+=a*self.dt
-				self.positions.append(self.positions[-1]+ds)
-			self.orientations.append(ds/norm_ds)
-			i+=1
+	def max_distance_race(self):
+		print('simulate race...')
+		for nc in range(self.n_cars):
+			c_rot=np.zeros(2)
+			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
+			crash=False
+			for ni in range(self.n_iter):
+				#----sensing the environment-----
+				inputs=self.get_inputs(nc)
 
+				# inputs=np.array([0,0,0,0,0,0])
+				#----decide for action
+				a=self.car_list[nc].get_a(inputs)
+				if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
+					print('v_max reached: '+str(self.car_list[nc].v))
+					a=0
+				if crash:
+					a=0
+				c=self.car_list[nc].get_c(inputs)
+				c_rot[0]=-self.orientations[nc][-1][1]
+				c_rot[1]=self.orientations[nc][-1][0]
+
+				#--action----
+				ds=self.orientations[nc][-1]*self.dt*self.car_list[nc].v
+				ds+=c_rot*c*np.linalg.norm(ds)
+				ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
+				norm_ds=np.linalg.norm(ds)+1e-10
+
+				#---check boundary conditions (crash)
+				t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1)
+				t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2)
+				t_p=min(t_p1,t_p2)
+				if t_p<(norm_ds+smalled_car_size)/norm_ds:
+					crash=True
+					self.car_list[nc].v=0
+					t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
+					self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
+					self.scores[nc]+=t_crash*norm_ds
+				#--update the states
+				else:
+					self.car_list[nc].v+=a*self.dt
+					self.positions[nc].append(self.positions[nc][-1]+ds)
+					self.scores[nc]+=norm_ds
+				if self.car_list[nc].v<0:
+					self.backward[nc].append(True)
+				elif self.car_list[nc].v>0:
+					self.backward[nc].append(False)
+				else:
+					self.backward[nc].append(self.backward[nc][-1])
+				abs_orientation=ds/norm_ds
+				if crash:
+					self.orientations[nc].append(self.orientations[nc][-1])
+				else:
+					if self.backward[nc][-1]:
+						self.orientations[nc].append(-abs_orientation)
+					else:
+						self.orientations[nc].append(abs_orientation)
+			self.car_list[nc].v=0
+
+
+	def max_rounds_race(self):
+		print('simulate race...')
+		for nc in range(self.n_cars):
+			c_rot=np.zeros(2)
+			checkpoint_counter=0#first argument is current round, second is the current checkpoint
+			delta=0
+			inputs=np.zeros(self.car_list[nc].n_inputs)
+			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
+			crash=False
+			for ni in range(self.n_iter):
+				#----sensing the environment-----
+				inputs=self.get_inputs(nc)
+				#----decide for action
+				a=self.car_list[nc].get_a(inputs)
+				if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
+					# print('v_max reached: '+str(self.car_list[nc].v))
+					a=0
+				if crash:
+					self.positions[nc].append(self.positions[nc][-1])
+					self.orientations[nc].append(self.orientations[nc][-1])
+					self.backward[nc].append(self.backward[nc][-1])
+				else:
+					c=self.car_list[nc].get_c(inputs)
+					c_rot[0]=-self.orientations[nc][-1][1]
+					c_rot[1]=self.orientations[nc][-1][0]
+
+					#--action----
+					ds=self.orientations[nc][-1]*self.dt*self.car_list[nc].v
+					ds+=c_rot*c*np.linalg.norm(ds)
+					ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
+					norm_ds=np.linalg.norm(ds)+1e-10
+
+					#---check boundary conditions (crash)
+					t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1)
+					t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2)
+					t_p=min(t_p1,t_p2)
+					if t_p<(norm_ds+smalled_car_size)/norm_ds:
+						crash=True
+						self.car_list[nc].v=0
+						t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
+						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
+					#--update the states
+					else:
+						self.car_list[nc].v+=a*self.dt
+						self.positions[nc].append(self.positions[nc][-1]+ds)
+					if self.car_list[nc].v<0:
+						self.backward[nc].append(True)
+					elif self.car_list[nc].v>0:
+						self.backward[nc].append(False)
+					else:
+						self.backward[nc].append(self.backward[nc][-1])
+					abs_orientation=ds/norm_ds
+					if crash:
+						self.orientations[nc].append(self.orientations[nc][-1])
+					else:
+						if self.backward[nc][-1]:
+							self.orientations[nc].append(-abs_orientation)
+						else:
+							self.orientations[nc].append(abs_orientation)
+					checkpoint,delta=self.get_checkpoint(nc)
+					if np.mod(checkpoint_counter+1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter+=1
+					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter-=1
+			self.scores[nc]=checkpoint_counter+delta
+			self.car_list[nc].v=0
+
+	def get_inputs(self,nc):
+		inputs=np.zeros(self.car_list[nc].n_inputs)
+		s0=self.orientations[nc][-1]
+		s1=rotation(np.pi/4,self.orientations[nc][-1])
+		s2=rotation(-np.pi/4,self.orientations[nc][-1])
+		t_p01,t_n01=self.map.closest_intersection(self.positions[nc][-1],s0,self.map.border1)
+		t_p02,t_n02=self.map.closest_intersection(self.positions[nc][-1],s0,self.map.border2)
+		t_p11,t_n11=self.map.closest_intersection(self.positions[nc][-1],s1,self.map.border1)
+		t_p12,t_n12=self.map.closest_intersection(self.positions[nc][-1],s1,self.map.border2)
+		t_p21,t_n21=self.map.closest_intersection(self.positions[nc][-1],s2,self.map.border1)
+		t_p22,t_n22=self.map.closest_intersection(self.positions[nc][-1],s2,self.map.border2)
+		inputs[0]=min(t_p01,t_p02)
+		inputs[1]=max(t_n01,t_n02)
+		inputs[2]=min(t_p11,t_p12)
+		inputs[3]=max(t_n11,t_n12)
+		inputs[4]=min(t_p21,t_p22)
+		inputs[5]=max(t_n21,t_n22)
+		return inputs
+
+	def get_checkpoint(self,nc):
+		d=np.zeros(self.n_checkpoints)
+		for c in range(self.n_checkpoints):
+			d[c]=np.linalg.norm(self.positions[nc][-1]-self.map.skeleton[c])
+		sorted_idx=np.argsort(d)
+		if sorted_idx[0]>sorted_idx[1]:
+			delta=-d[sorted_idx[0]]
+		else:
+			delta=d[sorted_idx[0]]
+		return sorted_idx[0],delta
+
+				
 	def plot_game(self,path='car_race.gif',imsize=256):
+		print('rendering ...')
 		frames=[]
 		_,_,map_im=self.map.draw_map(imsize=imsize,show=False,border_frac=self.border_frac)
-		# self.put_on_car(map_im,np.array([150,150]))
-		scale=imsize/self.map.size
+		scale=imsize/(self.map.size-1)
 		border=int(scale/self.border_frac)
-		for i in range(len(self.positions)):
-			sc=scale*self.positions[i]+border
-			pil_f=self.put_on_car(map_im.copy(),(max(0,sc[0]),max(sc[1],0)),self.orientations[i],size_car=int(self.car.size*scale))
-			frames.append(pil_f)
+		for ni in range(self.n_iter):
+			pil_f=map_im.copy()
+			for nc in range(self.n_cars):
+				sc=scale*self.positions[nc][ni]+border
+				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(self.car_list[nc].size*scale),path='cars/car_'+str(self.car_list[nc].model)+'.png')
+			frames.append(reflect_y_axis(pil_f))
 		print(len(frames))
 		frames[0].save(path,
 		               save_all=True,
 		               append_images=frames[1:],
-		               duration=100,
+		               duration=10*self.dt/0.01,
 		               loop=0)
 
-	def put_on_car(self,map_im,position,orientation,path='cars/car_2.png',size_car=16):
+	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_2.png',size_car=16):
 		car_im = Image.open(path)
 		phi=np.arctan(orientation[0]/(orientation[1]+1e-10))*360/(2*np.pi)+180#need to add 180 because show() has y-coordinate southwards
 		if orientation[1]<0:
-				phi+=180
+			phi+=180
 		car_im=resize_to_height_ref(car_im,size_car).rotate(phi, expand=True)
 		#rotate(phi+180, expand=True)
 		w,h=car_im.size
@@ -97,12 +230,34 @@ class Game():
 				idx_h=int(position[1])-h_2+j
 				if 10<sp<750 and 0<=idx_w<W and 0<=idx_h<H:
 					map_im_px[idx_w,idx_h]=car_im_px[i,j]
-		return reflect_y_axis(map_im)
+		return map_im
+
+	def selection_and_mutation(self,N_sel,N_mut):
+		print('selection and mutation ....')
+		print(self.scores)
+		sorted_idx=np.argsort(self.scores)
+		print('Best score: '+str(self.scores[sorted_idx[-1]]))
+		selected_cars=[]
+		mutated_cars=[]
+		mutation_rate=[]
+		for i in range(N_sel):
+			selected_cars.append(self.car_list[sorted_idx[-1-i]])
+			mutation_rate.append(1+100/(1+self.scores[sorted_idx[-1-i]]))
+		if N_sel>=self.n_cars:
+			print('Not enough cars! No selection!')
+		mutated_cars.append(selected_cars[0])
+		n=1
+		while n<=N_mut-1:
+			mutated_cars.append(deepcopy(selected_cars[np.mod(n,N_sel)]))
+			mutated_cars[-1].mutation(mutation_rate=mutation_rate[np.mod(n,N_sel)])
+			n+=1
+		return mutated_cars
 
 
-
+#–---CAR-----
 class Car():
-	def __init__(self,v_max=5,grip=0,m=1000,F_max=10000,size=0.1):
+	def __init__(self,v_max=5,grip=0,m=1000,F_max=1000,size=0.1,model=2,backward=0.1):
+		self.model=model
 		self.v=0
 		self.F_max=F_max
 		self.m=m
@@ -110,30 +265,56 @@ class Car():
 		self.a_max=F_max/m
 		self.v_max=v_max
 		self.n_inputs=6
+		self.n_h=3
 		self.grip=grip#larger than zero, zero is maximum grip...
-		self.a_weights=np.random.rand(self.n_inputs+1)-0.5
-		self.c_weights=np.random.rand(self.n_inputs+1)-0.5
+		self.backward=backward#the capability to drive backward compared to forward
+		self.a_weights=np.random.rand(self.n_h+1)-0.5
+		self.c_weights=(np.random.rand(self.n_h+1)-0.5)
+		self.h_weights=np.random.rand(self.n_inputs+2,self.n_h)-0.5#parametersharing of hidden representation
 
-	def mutation(self,weights,scale=0.1):
-		return weights+(np.random.rand(self.n_inputs)-0.5)*scale
+	def mutation(self,mutation_rate=1):
+		#mutation_rate can be any positive number
+		self.a_weights+=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
+		self.c_weights+=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
+		self.h_weights+=(np.random.rand(self.n_inputs+2,self.n_h)-0.5)*0.1*mutation_rate
+		# print(np.linalg.norm(self.a_weights))
+		# print(np.linalg.norm(self.c_weights))
+
+	def get_h(self,inputs):
+		s=self.h_weights[0,:].copy()
+		s+=self.h_weights[1,:]*self.v
+		for i in range(inputs.shape[0]):
+			s+=self.h_weights[i+2,:].copy()*inputs[i]
+		return sigmoid(s)	
 
 	def get_a(self,inputs):
+		h=self.get_h(inputs)
 		s=self.a_weights[0]
-		s+=self.a_weights[1]*self.v
-		for i in range(inputs.shape[0]):
-			s+=self.a_weights[i+2]*inputs[i]
-		return sigmoid(s)*self.a_max
+		for i in range(self.n_h):
+			s+=self.a_weights[i+1]*h[i]
+		a=sigmoid(s,bias=-0.5)*self.a_max
+		if a<0:
+			a*=self.backward
+		if a>self.a_max-0.1:
+			print('a_max reached')
+		return a
 
 	def get_c(self,inputs):
+		h=self.get_h(inputs)
 		s=self.c_weights[0]
-		s+=self.c_weights[1]*self.v
-		for i in range(inputs.shape[0]):
-			s+=self.c_weights[i+2]*inputs[i]
-		return sigmoid(s)*(abs(self.v)**self.grip)
+		for i in range(self.n_h):
+			s+=self.c_weights[i+1]*h[i]
+		return sigmoid(s,bias=-0.5)*(abs(self.v)**self.grip)
 
+
+#----MAP-------
 class Map():
     def __init__(self,size=4):
     	self.size=size
+    	if self.size>=5:
+    		self.min_map_length=2*self.size
+    	else:
+    		self.min_map_length=(self.size-1)**2+2
     	skeleton=self.create_map()
     	for i in range(len(skeleton)):
     		skeleton[i]=np.asarray(skeleton[i])
@@ -181,7 +362,7 @@ class Map():
     		trace.append(possible_next_coordinate[direction])
     	else: 
     		return self.recurrent_map_creation(initial_trace,initial_trace.copy())
-    	if trace[-1]==trace[0]:
+    	if trace[-1]==trace[0] and len(trace)>=self.min_map_length:
     		return trace
     	else:
     		return self.recurrent_map_creation(trace,initial_trace)
@@ -190,14 +371,15 @@ class Map():
     	positive_s_points=[]
     	negative_s_points=[]
     	t_pos=1e10
-    	t_neg=1e10
+    	t_neg=-1e10
     	for i in range(len(segment_list)-1):
     		t_i=intersection_of_two_lines(p,d,segment_list[i],segment_list[i+1]-segment_list[i])
-    		if 0<=t_i[1]<=1:
-    			if t_i[0]>=0:
-    				positive_s_points.append(t_i[0])
-    			else:
-    				negative_s_points.append(t_i[0])
+    		if t_i[1] is not None:
+	    		if 0<=t_i[1]<=1:
+	    			if t_i[0]>=0:
+	    				positive_s_points.append(t_i[0])
+	    			else:
+	    				negative_s_points.append(t_i[0])
     	if len(positive_s_points)>0:
     		t_pos=np.min(np.asarray(positive_s_points))
     	if len(negative_s_points)>0:
@@ -208,7 +390,7 @@ class Map():
     	#skeleton is an (ordered) list of coordinates
     	if skeleton is None:
     		skeleton=self.skeleton
-    	scale=imsize/self.size
+    	scale=imsize/(self.size-1)
     	border=int(scale/3)
     	width=int(imsize/100)
     	im=create_image(imsize+2*border,imsize+2*border)
@@ -220,18 +402,23 @@ class Map():
     def draw_map(self,skeleton=None,imsize=256,show=True,border_frac=3):
     	if skeleton is None:
     		skeleton=self.skeleton
-    	scale=imsize/self.size
+    	scale=imsize/(self.size-1)
     	border=int(scale/border_frac)
     	width=int(imsize/100)
     	im=create_image(imsize+2*border,imsize+2*border)
+    	W,H=im.size
+    	px_im=im.load()
+    	for w in range(W):
+    		for h in range(H):
+    			px_im[w,h]=(0,200,0)
     	draw = ImageDraw.Draw(im)
     	cb1,cb2=self.get_border_coordinates(skeleton=skeleton)
     	coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
     	ccb1=[tuple(scale*c+border for c in t) for t in cb1]
     	ccb2=[tuple(scale*c+border for c in t) for t in cb2]
-    	draw.line(coordinates,fill=(0,0,255),width=width)
-    	draw.line(ccb1,fill=(255,0,0),width=width)
-    	draw.line(ccb2,fill=(255,0,0),width=width)
+    	draw.line(coordinates,fill=(150,150,150),width=int(2*border))
+    	draw.line(ccb1,fill=(200,0,50),width=width)
+    	draw.line(ccb2,fill=(200,0,50),width=width)
     	if show:
     		im.show()
     	return cb1,cb2,im
@@ -294,8 +481,8 @@ def create_image(i, j):
 	image = Image.new("RGB", (i, j), "white")
 	return image
 
-def sigmoid(s):
-	return 1/(1+np.exp(-s))	
+def sigmoid(s,bias=0):
+	return 1/(1+np.exp(-s))+bias
 
 def resize_to_height_ref(image,n_height):
     w,h=image.size
@@ -311,11 +498,17 @@ def intersection_of_two_lines(p1,d1,p2,d2):
 	A[:,1]=-d2
 	det=np.linalg.det(A)
 	if abs(det)<1e-10 or False:
-		return np.array([1e10,1e10])
+		return np.array([None,None])
 	else:
 		A_inv=np.linalg.inv(A) 
 		t=np.dot(A_inv,p2-p1)
 		#s=p1+t[0]*d1
 		return t
+
+def rotation(alpha,v):
+	c=np.cos(alpha)
+	s=np.sin(alpha)
+	R=np.array([[c,-s],[s,c]])
+	return np.dot(R,v)
 
 
