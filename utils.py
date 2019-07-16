@@ -8,16 +8,15 @@ import numpy as np
 from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw
 import PIL
 import numpy as np
-import random
 import pickle
 
 import matplotlib.pyplot as plt
 
-random.seed(0)
-np.random.seed(7)
+# np.random.seed(7)
 
 class Game():
-	def __init__(self,race_map,car_list,n_iter=50,dt=0.01,border_frac=3):
+	def __init__(self,race_map,car_list,n_iter=50,dt=0.01,border_frac=3,save_path='best_cars/best_car.pkl'):
+		self.save_path=save_path
 		self.map=race_map
 		self.n_checkpoints=len(self.map.skeleton)-1
 		self.n_cars=len(car_list)
@@ -172,8 +171,82 @@ class Game():
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
 
+	def max_rounds_race_only_front_sight(self,c_weight=1):
+		print('simulate race...')
+		for nc in range(self.n_cars):
+			last_c=0
+			c_rot=np.zeros(2)
+			checkpoint_counter=0#first argument is current round, second is the current checkpoint
+			delta=0
+			inputs=np.zeros(self.car_list[nc].n_inputs)
+			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
+			crash=False
+			for ni in range(self.n_iter):
+				if crash:
+					self.positions[nc].append(self.positions[nc][-1])
+					self.orientations[nc].append(self.orientations[nc][-1])
+					self.backward[nc].append(self.backward[nc][-1])
+				else:
+					#----sensing the environment-----
+					inputs=self.get_inputs(nc)
+					#----decide for action
+					a=self.car_list[nc].get_a(inputs[0::2])
+					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
+					# print('v_max reached: '+str(self.car_list[nc].v))
+						a=0
+					c=c_weight*self.car_list[nc].get_c(inputs[0::2])+(1-c_weight)*last_c
+					last_c=c
+					c_rot[0]=-self.orientations[nc][-1][1]
+					c_rot[1]=self.orientations[nc][-1][0]
+
+					#--action----
+					ds=self.orientations[nc][-1]*self.dt*self.car_list[nc].v
+					ds+=c_rot*c*np.linalg.norm(ds)
+					ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
+					norm_ds=np.linalg.norm(ds)+1e-10
+
+					#---check boundary conditions (crash)
+					t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1)
+					t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2)
+					t_p=min(t_p1,t_p2)
+					if t_p<(norm_ds+smalled_car_size)/norm_ds:
+						crash=True
+						if ni+1>self.max_frames:
+							self.max_frames=ni+1
+						self.car_list[nc].v=0
+						t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
+						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
+					#--update the states
+					else:
+						self.car_list[nc].v+=a*self.dt
+						self.positions[nc].append(self.positions[nc][-1]+ds)
+					if self.car_list[nc].v<0:
+						self.backward[nc].append(True)
+					elif self.car_list[nc].v>0:
+						self.backward[nc].append(False)
+					else:
+						self.backward[nc].append(self.backward[nc][-1])
+					abs_orientation=ds/norm_ds
+					if crash:
+						self.orientations[nc].append(self.orientations[nc][-1])
+					else:
+						if self.backward[nc][-1]:
+							self.orientations[nc].append(-abs_orientation)
+						else:
+							self.orientations[nc].append(abs_orientation)
+					checkpoint,delta=self.get_checkpoint(nc)
+					if np.mod(checkpoint_counter+1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter+=1
+					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter-=1
+			self.scores[nc]+=checkpoint_counter+delta
+			self.car_list[nc].v=0
+			if self.max_frames==0:
+				self.max_frames=self.n_iter
+			self.winner_car=np.argmax(self.scores)
+
 	def get_inputs(self,nc):
-		inputs=np.zeros(self.car_list[nc].n_inputs)
+		inputs=np.zeros(6)
 		s0=self.orientations[nc][-1]
 		s1=rotation(np.pi/4,self.orientations[nc][-1])
 		s2=rotation(-np.pi/4,self.orientations[nc][-1])
@@ -227,7 +300,7 @@ class Game():
 		               loop=0)
 
 	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_2.png',size_car=16,winner_car=False):
-		winner_weight=0.8
+		winner_weight=0.7
 		car_im = Image.open(path).convert('RGB')
 		map_im=map_im.convert('RGB')
 		phi=np.arctan(orientation[0]/(orientation[1]+1e-10))*360/(2*np.pi)+180#need to add 180 because show() has y-coordinate southwards
@@ -249,15 +322,15 @@ class Game():
 				idx_h=int(position[1])-h_2+j
 				if winner_car:
 					if i==0 or i==w-1 or j==0 or j==h-1:
-						map_im_px[idx_w,idx_h]=(255,200,0)
+						map_im_px[int(min(max(idx_w,0),W-1)),int(min(max(idx_h,0),H-1))]=(255,215,0)
 				if 10<sp<750 and 0<=idx_w<W and 0<=idx_h<H:
 					if winner_car:
-						map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,255,0])).astype(int))
+						map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,215,0])).astype(int))
 					else:
 						map_im_px[idx_w,idx_h]=car_im_px[i,j]
 		return map_im
 
-	def selection_and_mutation(self,N_sel,N_mut):
+	def selection_and_mutation(self,N_sel,N_mut,mut_fac=1):
 		print('selection and mutation ....')
 		sorted_idx=np.argsort(self.scores)
 		print('Best score: '+str(self.scores[sorted_idx[-1]]))
@@ -266,9 +339,9 @@ class Game():
 		mutation_rate=[]
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
-			mutation_rate.append(1+100/(1+self.scores[sorted_idx[-1-i]]))
+			mutation_rate.append(mut_fac+100/(1+self.scores[sorted_idx[-1-i]]))
 
-		with open('best_cars/best_car_map.pkl', 'wb') as f:
+		with open(self.save_path, 'wb') as f:
 			pickle.dump(selected_cars[0], f )	
 
 		if N_sel>=self.n_cars:
@@ -284,7 +357,7 @@ class Game():
 
 #–---CAR-----
 class Car():
-	def __init__(self,v_max=5,grip=0,m=1000,F_max=1000,size=0.1,model=2,backward=0.1):
+	def __init__(self,v_max=5,grip=0,m=1000,F_max=1000,size=0.1,model=2,backward=0.1,n_inputs=6,n_h=3):
 		self.model=model
 		self.v=0
 		self.F_max=F_max
@@ -292,8 +365,8 @@ class Car():
 		self.size=size
 		self.a_max=F_max/m
 		self.v_max=v_max
-		self.n_inputs=6
-		self.n_h=3
+		self.n_inputs=n_inputs
+		self.n_h=n_h
 		self.grip=grip#smaller or equal zero. zero is perfect grip. -1 is not good grip
 		self.backward=backward#the capability to drive backward compared to forward
 		self.a_weights=np.random.rand(self.n_h+1)-0.5
@@ -344,9 +417,14 @@ class Map():
     	else:
     		self.min_map_length=(self.size-1)**2+2
     	skeleton=self.create_map()
-    	for i in range(len(skeleton)):
-    		skeleton[i]=np.asarray(skeleton[i])
-    	self.skeleton=skeleton
+    	self.id=()
+    	self.skeleton=[np.asarray(skeleton[0])]
+    	for i in range(1,len(skeleton)):
+    		self.id+=skeleton[i-1]
+    		self.skeleton.append(np.asarray(skeleton[i]))
+    	# print(self.skeleton[2])
+    	# print(self.id[4])
+    	# print(self.id[5])
     	border1,border2,map_im=self.draw_map(show=False)
     	for i in range(len(border1)):
     		border1[i]=np.asarray(border1[i])
@@ -425,7 +503,7 @@ class Map():
     	draw = ImageDraw.Draw(im)
     	coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
     	draw.line(coordinates,fill=(0,0,255),width=width)
-    	im.show()
+    	reflect_y_axis(im).show()
 
     def draw_map(self,skeleton=None,imsize=256,show=True,border_frac=3):
     	if skeleton is None:
@@ -448,7 +526,7 @@ class Map():
     	draw.line(ccb1,fill=(200,0,50),width=width)
     	draw.line(ccb2,fill=(200,0,50),width=width)
     	if show:
-    		im.show()
+    		reflect_y_axis(im).show()
     	return cb1,cb2,im
 
 
