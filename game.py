@@ -244,9 +244,14 @@ class Game():
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
 
-	def max_rounds_race_shape(self,c_weight=0.8):
+	def max_rounds_race_shape(self,c_weight=0.8,get_data=False):
 		print('simulate race...')
+		if get_data:
+			data=[]#list of sequences, where each sequence point contains the information (measurement/inputs,d_score,action)
 		for nc in range(self.n_cars):
+			if get_data:
+				data.append([])
+				score_tracker=self.positions[nc][0][0]
 			self.car_list[nc].transform_shape()
 			last_c=0
 			c_rot=np.zeros(2)
@@ -256,6 +261,8 @@ class Game():
 			longitudinal_car_size=0.5*self.car_list[nc].size*self.car_list[nc].aerodynamic
 			crash=False
 			for ni in range(self.n_iter):
+				if get_data:
+					data_point=np.zeros(6)#3 measurment inputs, 1 score, 2 ds
 				if crash:
 					self.positions[nc].append(self.positions[nc][-1])
 					self.orientations[nc].append(self.orientations[nc][-1])
@@ -263,6 +270,8 @@ class Game():
 				else:
 					#----sensing the environment-----
 					inputs=self.get_inputs(nc)
+					if get_data:
+						data_point[0:3]=inputs[0::2]
 					#----decide for action
 					a=self.car_list[nc].get_a(inputs[0::2])
 					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
@@ -282,7 +291,6 @@ class Game():
 					#---check boundary conditions (crash)
 					t_p1,_,d_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
 					t_p2,_,d_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
-					# t_p=min(t_p1,t_p2)
 					t_list=[t_p1,t_p2]
 					d_list=[d_p1,d_p2]
 					closes_idx=np.argmin(t_list)
@@ -303,10 +311,13 @@ class Game():
 						self.car_list[nc].v=0
 						t_crash=max(0,(t_p*norm_ds-(longitudinal_car_size+do))/norm_ds)
 						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
+
 					#--update the states
 					else:
 						self.car_list[nc].v+=a*self.dt
 						self.positions[nc].append(self.positions[nc][-1]+ds)
+						if get_data:
+							data_point[4:]=ds
 					if self.car_list[nc].v<0:
 						self.backward[nc].append(True)
 					elif self.car_list[nc].v>0:
@@ -326,11 +337,18 @@ class Game():
 						checkpoint_counter+=1
 					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
 						checkpoint_counter-=1
+					if get_data:
+						data_point[3]=checkpoint_counter+delta-score_tracker
+						score_tracker=checkpoint_counter+delta
+					data[nc].append(data_point)
 			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
 			if self.max_frames==0:
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
+		if get_data:
+			return data
+
 
 	def get_inputs(self,nc):
 		inputs=np.zeros(6)

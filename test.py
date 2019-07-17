@@ -30,7 +30,7 @@ parser.add_argument('--plot_every', type=int, default=1)
 parser.add_argument('--n_h', type=int, default=5)
 parser.add_argument('--load_car', type=str2bool, default=False)
 
-np.random.seed(8)
+np.random.seed(0)
 opt = parser.parse_args()
 print(opt)
 
@@ -113,8 +113,6 @@ else:
 
 
 scores=np.zeros(n_cars)
-# best_score=0
-mut_fac=1
 for g in range(N_gen):
 	print('Race: '+str(g+1))
 	for m in range(len(race_map_list)):
@@ -122,17 +120,11 @@ for g in range(N_gen):
 		game=Game(race_map_list[m],cars,dt=0.08,n_iter=opt.n_iter,save_path=save_path)
 		game.scores=scores
 		# game.max_rounds_race_only_front_sight()
-		game.max_rounds_race_shape()
+		data=game.max_rounds_race_shape(get_data=True)
 		scores=game.scores
-		game.plot_game(imsize=int(100*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1+27)+'_map='+str(m+1)+'.gif',car_shape=True)
+		game.plot_game(imsize=int(100*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
 		# game.plot_game(imsize=int(90*np.sqrt(race_map_list[m].size)),path='gifs/front_generation='+str(g+1+24)+'_map='+str(m+1)+'.gif')
-	# if best_score>=np.max(scores):
-	# 	mut_fac*=2
-	# 	print('updated_mut_fac='+str(mut_fac))
-	# else:
-	# 	mut_fac=1
-	# 	best_score=np.max(scores)
-	cars=game.selection_and_mutation(N_sel,N_mut,mut_fac=mut_fac,shape_mutation=True)
+	cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=True)
 	scores=np.zeros(n_cars)
 
 
