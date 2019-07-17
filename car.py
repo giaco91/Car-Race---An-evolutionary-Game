@@ -55,7 +55,7 @@ class Car():
 
 
 	def transform_shape(self):
-		self.size=max(0.001,0.2*self.grip+0.3)
+		self.size=max(0.01,0.2*self.grip+0.3+self.v_max/100)
 		self.aerodynamic=1+self.v_max**2
 		self.m=200+self.size/0.01
 		self.F_max=1000*np.sqrt(self.aerodynamic)

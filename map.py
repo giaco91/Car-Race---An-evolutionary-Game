@@ -77,24 +77,42 @@ class Map():
     	else:
     		return self.recurrent_map_creation(trace,initial_trace)
 
-    def closest_intersection(self,p,d,segment_list):
+    def closest_intersection(self,p,d,segment_list,get_also_directions=False):
     	positive_s_points=[]
     	negative_s_points=[]
     	t_pos=1e10
+    	d_pos=[]
     	t_neg=-1e10
+    	d_neg=[]
     	for i in range(len(segment_list)-1):
-    		t_i=intersection_of_two_lines(p,d,segment_list[i],segment_list[i+1]-segment_list[i])
+    		d_seg=segment_list[i+1]-segment_list[i]
+    		t_i=intersection_of_two_lines(p,d,segment_list[i],d_seg)
     		if t_i[1] is not None:
 	    		if 0<=t_i[1]<=1:
 	    			if t_i[0]>=0:
 	    				positive_s_points.append(t_i[0])
+	    				d_pos.append(d_seg)
 	    			else:
 	    				negative_s_points.append(t_i[0])
+	    				d_neg.append(d_seg)
     	if len(positive_s_points)>0:
-    		t_pos=np.min(np.asarray(positive_s_points))
+    		# t_pos=np.min(np.asarray(positive_s_points))
+    		idx=np.argmin(np.asarray(positive_s_points))
+    		t_pos=positive_s_points[idx]
+    		d_p=d_pos[idx]
+    	else:
+    		d_p=d
     	if len(negative_s_points)>0:
-    		t_neg=np.max(np.asarray(negative_s_points))
-    	return t_pos,t_neg
+    		# t_neg=np.max(np.asarray(negative_s_points))
+    		idx=np.argmax(np.asarray(negative_s_points))
+    		t_neg=negative_s_points[idx]
+    		d_n=d_neg[idx]
+    	else:
+    		d_n=d
+    	if get_also_directions:
+    		return t_pos,t_neg,d_p,d_n
+    	else:
+    		return t_pos,t_neg
 
     def draw_skeleton(self,skeleton=None,imsize=256):
     	#skeleton is an (ordered) list of coordinates

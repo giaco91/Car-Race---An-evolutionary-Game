@@ -54,4 +54,7 @@ def rotation(alpha,v):
 	R=np.array([[c,-s],[s,c]])
 	return np.dot(R,v)
 
+def get_angle(v1,v2):
+	return np.arccos(np.dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)))
+
 

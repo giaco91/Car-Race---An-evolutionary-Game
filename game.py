@@ -64,8 +64,8 @@ class Game():
 				norm_ds=np.linalg.norm(ds)+1e-10
 
 				#---check boundary conditions (crash)
-				t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1)
-				t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2)
+				t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
+				t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
 				t_p=min(t_p1,t_p2)
 				if t_p<(norm_ds+smalled_car_size)/norm_ds:
 					crash=True
@@ -170,7 +170,7 @@ class Game():
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
 
-	def max_rounds_race_only_front_sight(self,c_weight=1):
+	def max_rounds_race_only_front_sight(self,c_weight=0.8):
 		print('simulate race...')
 		for nc in range(self.n_cars):
 			last_c=0
@@ -244,7 +244,7 @@ class Game():
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
 
-	def max_rounds_race_shape(self,c_weight=1):
+	def max_rounds_race_shape(self,c_weight=0.8):
 		print('simulate race...')
 		for nc in range(self.n_cars):
 			self.car_list[nc].transform_shape()
@@ -253,7 +253,7 @@ class Game():
 			checkpoint_counter=0#first argument is current round, second is the current checkpoint
 			delta=0
 			inputs=np.zeros(self.car_list[nc].n_inputs)
-			smalled_car_size=0.9*self.car_list[nc].size*self.car_list[nc].aerodynamic#kosmetik
+			longitudinal_car_size=0.5*self.car_list[nc].size*self.car_list[nc].aerodynamic
 			crash=False
 			for ni in range(self.n_iter):
 				if crash:
@@ -280,15 +280,28 @@ class Game():
 					norm_ds=np.linalg.norm(ds)+1e-10
 
 					#---check boundary conditions (crash)
-					t_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1)
-					t_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2)
-					t_p=min(t_p1,t_p2)
-					if t_p<(norm_ds+smalled_car_size)/norm_ds:
+					t_p1,_,d_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
+					t_p2,_,d_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
+					# t_p=min(t_p1,t_p2)
+					t_list=[t_p1,t_p2]
+					d_list=[d_p1,d_p2]
+					closes_idx=np.argmin(t_list)
+					t_p=t_list[closes_idx]
+					d_p=d_list[closes_idx]
+					if tuple(d_p)==tuple(ds):
+						do=0
+						alpha=0
+					else:
+						alpha=get_angle(d_p,ds)
+						do=abs((self.car_list[nc].size/2)/np.tan(alpha))
+						if alpha==0:
+							raise ValueError('alpha is zero')
+					if t_p<(norm_ds+longitudinal_car_size+do)/norm_ds:
 						crash=True
 						if ni+1>self.max_frames:
 							self.max_frames=ni+1
 						self.car_list[nc].v=0
-						t_crash=(t_p*norm_ds-smalled_car_size)/norm_ds
+						t_crash=max(0,(t_p*norm_ds-(longitudinal_car_size+do))/norm_ds)
 						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
 					#--update the states
 					else:
@@ -369,7 +382,7 @@ class Game():
 					winner_car=True
 				else:
 					winner_car=False
-				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(self.car_list[nc].size*scale),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)
+				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)
 			frames.append(reflect_y_axis(pil_f))
 		print(len(frames))
 		frames[0].save(path,
@@ -386,6 +399,10 @@ class Game():
 		if orientation[1]<0:
 			phi+=180
 		if car_shape is not None:
+			if size_car<=0:
+				print('size_car is smaller or equal to zero: '+str(size_car))
+			if int(size_car*car_shape)<=0:
+				print('size_car times car_shape is smaller or equal to zero: '+str(int(size_car*car_shape)))
 			car_im=resize(car_im,size_car,int(size_car*car_shape))
 		else:
 			car_im=resize_to_height_ref(car_im,size_car)
@@ -426,8 +443,8 @@ class Game():
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
 			mutation_rate.append(mut_fac+100/(1+self.scores[sorted_idx[-1-i]]))
 
-		print(selected_cars[0].aerodynamic)
-		print(selected_cars[0].size)
+		print('aerodynamic: '+str(selected_cars[0].aerodynamic))
+		print('size: '+str(selected_cars[0].size))
 		with open(self.save_path, 'wb') as f:
 			pickle.dump(selected_cars[0], f )	
 
