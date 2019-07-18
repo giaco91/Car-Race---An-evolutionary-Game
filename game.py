@@ -250,7 +250,8 @@ class Game():
 			data=[]#list of sequences, where each sequence point contains the information (measurement/inputs,d_score,action)
 		for nc in range(self.n_cars):
 			if get_data:
-				data.append([])
+				data.append([np.zeros(6)])
+				data[nc][0][3:]=np.array([0,0,0])#the first ds is implicitely assumed to be zero because the initial velocity is zero, as well as the first reward is zero
 				score_tracker=self.positions[nc][0][0]
 			self.car_list[nc].transform_shape()
 			last_c=0
@@ -271,7 +272,8 @@ class Game():
 					#----sensing the environment-----
 					inputs=self.get_inputs(nc)
 					if get_data:
-						data_point[0:3]=inputs[0::2]
+						data[nc][ni][0:3]=inputs[0::2]
+						# data_point[0:3]=inputs[0::2]
 					#----decide for action
 					a=self.car_list[nc].get_a(inputs[0::2])
 					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
@@ -301,7 +303,7 @@ class Game():
 						alpha=0
 					else:
 						alpha=get_angle(d_p,ds)
-						do=abs((self.car_list[nc].size/2)/np.tan(alpha))
+						do=0.9*abs((self.car_list[nc].size/2)/np.tan(alpha))
 						if alpha==0:
 							raise ValueError('alpha is zero')
 					if t_p<(norm_ds+longitudinal_car_size+do)/norm_ds:
@@ -341,6 +343,7 @@ class Game():
 						data_point[3]=checkpoint_counter+delta-score_tracker
 						score_tracker=checkpoint_counter+delta
 					data[nc].append(data_point)
+			data[nc]=data[nc][:-1]
 			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
 			if self.max_frames==0:

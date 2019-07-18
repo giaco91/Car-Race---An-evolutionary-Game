@@ -58,3 +58,28 @@ def get_angle(v1,v2):
 	return np.arccos(np.dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)))
 
 
+def pack_sequences(data):
+	#the data is a list of sequences. Every sequence is it self a list of data points.
+    #the data must be preprocessed in order to use nn.utils.rnn.pack_padded_sequence
+    #sequence size:(batchsize,max_seq_length,data_dim)
+    n_sequences=len(data)
+    data_point_dim=2+3#2 for the ds-vector and 3 for the measurment vector
+    sequence_lengths=np.zeros(n_sequences).astype(int)
+    for i in range(n_sequences):
+    	sequence_lengths[i]=int(len(data[i]))
+    sorted_idx=np.argsort(sequence_lengths)
+    sorted_sequence_lengths=[]
+    data_batch=torch.zeros(n_sequences,sequence_lengths[sorted_idx[-1]],5)
+    for i in range(n_sequences):
+    	data_batch[i,0:sequence_lengths[sorted_idx[-1-i]],:]=torch.from_numpy(np.asarray(data[sorted_idx[-1-i]])[:,np.asarray([0,1,2,4,5])])
+    	sorted_sequence_lengths.append(sequence_lengths[sorted_idx[-1-i]])
+    packed_data_batch = nn.utils.rnn.pack_padded_sequence(data_batch, sorted_sequence_lengths, batch_first=True)
+    return packed_data_batch
+
+
+def unpack_sequences(data_packed):
+    #the inverse of pack sequences
+    data, seq_lengths= nn.utils.rnn.pad_packed_sequence(data_packed, batch_first=True)
+    return data,seq_lengths
+
+

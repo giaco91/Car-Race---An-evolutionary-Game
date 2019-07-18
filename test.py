@@ -2,6 +2,7 @@ from utils import *
 from car import *
 from game import *
 from map import *
+from environment_model import *
 
 
 from copy import deepcopy
@@ -96,21 +97,16 @@ else:
 		# print(cars[-1].v_max)
 		# print(cars[-1].grip)
 
-# proto_car=[]
-# new_car=Car(size=0.15,model=1,grip=1,v_max=5,n_inputs=3,n_h=3)
-# with open(save_path2, 'rb') as f:
-#     best_car = pickle.load(f)
-# new_car.a_weights=best_car.a_weights
-# new_car.c_weights=best_car.c_weights
-# new_car.h_weights[0:2,:]=best_car.h_weights[0:2,:]
-# new_car.h_weights[2:,:]=best_car.h_weights[3:,:][0::2,:]
-# for nc in range(n_cars):
-# 	cars.append(deepcopy(new_car))
-# 	cars[-1].mutation()
-# 	cars[-1].grip=-1
-# 	cars[-1].v_max=100
+def get_loss(m_hat,r_hat,m,r,batchSize,seq_lengths):
+	loss=0
+	for bs in range(batchSize):
+		dm_bs=m_hat[bs,:seq_lengths[bs],:]-m[bs,:seq_lengths[bs],:]
+		dr_bs=r_hat[bs,:seq_lengths[bs],:]-r[bs,:seq_lengths[bs],:]
+		loss+=(torch.sum(torch.mul(dm_bs,dm_bs))+torch.sum(torch.mul(dr_bs,dr_bs)))/int(seq_lengths[bs])
+	return loss
 
-
+environment_model=Environment_model()
+optimizer= torch.optim.Adam(environment_model.parameters(), lr=0.001)
 
 scores=np.zeros(n_cars)
 for g in range(N_gen):
@@ -119,14 +115,24 @@ for g in range(N_gen):
 		print('map: '+str(m+1))
 		game=Game(race_map_list[m],cars,dt=0.08,n_iter=opt.n_iter,save_path=save_path)
 		game.scores=scores
-		# game.max_rounds_race_only_front_sight()
 		data=game.max_rounds_race_shape(get_data=True)
 		scores=game.scores
-		game.plot_game(imsize=int(100*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
-		# game.plot_game(imsize=int(90*np.sqrt(race_map_list[m].size)),path='gifs/front_generation='+str(g+1+24)+'_map='+str(m+1)+'.gif')
+		# game.plot_game(imsize=int(100*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
 	cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=True)
 	scores=np.zeros(n_cars)
 
+n_epochs=100
+for i in range(n_epochs):
+	optimizer.zero_grad()
+	packed_sequences=pack_sequences(data)
+	out_m, out_r, h_rare=environment_model(packed_sequences,n_cars)
+	unpacked_sequences,seq_lengths=unpack_sequences(packed_sequences)
+	m=unpacked_sequences[:,:,0:3]
+	r=unpacked_sequences[:,:,3].unsqueeze(2)
+	loss=get_loss(out_m,out_r,m,r,n_cars,seq_lengths)
+	loss.backward()
+	optimizer.step()
+	print(loss.item())
 
 	
 
