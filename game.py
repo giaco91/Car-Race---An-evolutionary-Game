@@ -252,6 +252,8 @@ class Game():
 			if get_data:
 				data.append([np.zeros(6)])
 				data[nc][0][3:]=np.array([0,0,0])#the first ds is implicitely assumed to be zero because the initial velocity is zero, as well as the first reward is zero
+				inputs=self.get_inputs(nc)
+				data[nc][0][0:3]=inputs[0::2]#we implicitely assume that the first measurment was measured twice, once in the zero step round
 				score_tracker=self.positions[nc][0][0]
 			self.car_list[nc].transform_shape()
 			last_c=0
@@ -272,7 +274,8 @@ class Game():
 					#----sensing the environment-----
 					inputs=self.get_inputs(nc)
 					if get_data:
-						data[nc][ni][0:3]=inputs[0::2]
+						# data[nc][ni][0:3]=inputs[0::2]
+						data_point[0:3]=inputs[0::2]
 						# data_point[0:3]=inputs[0::2]
 					#----decide for action
 					a=self.car_list[nc].get_a(inputs[0::2])
@@ -383,6 +386,37 @@ class Game():
 			delta=d[sorted_idx[0]]
 		return sorted_idx[0],delta
 
+	def plot_halucination(self,ds,inputs,scores,imsize=256,path='gifs/halu.gif',car=None,car_shape=None):
+		print('rendering halucination...')
+		frames=[]
+		scale=imsize/4#we can fix an arbitrary nice enough looking mapsize for the scale.
+		# border=imsize/9
+		background_im=create_image(int(1.5*imsize),int(1.5*imsize))
+		current_input_coordinates=None
+		if car is None:
+			car_size=int(0.1*scale)
+		else:
+			car_size=int(max(1,car.size*scale))
+			if car_shape:
+				car_shape=car.aerodynamic
+		for n in range(1,len(ds)):
+			prev_ds_norm=np.linalg.norm(ds[n-1])
+			if prev_ds_norm==0:
+				prev_orientation=np.array([1,0])
+			else:
+				prev_orientation=ds[n-1]/prev_ds_norm
+			scaled_ds=scale*ds[n]
+			scaled_inputs=scale*inputs[n]
+			pil_f,non_shifted_background_im,current_input_coordinates=halu_step(background_im,scaled_ds,scaled_inputs,scores,prev_orientation,size_car=car_size,car_shape=car_shape,prev_input_coordinates=current_input_coordinates)
+			background_im=get_shifted_background(non_shifted_background_im.copy(),scaled_ds)
+			frames.append(reflect_y_axis(pil_f))
+		print(len(frames))
+		frames[0].save(path,
+		               save_all=True,
+		               append_images=frames[1:],
+		               duration=30*self.dt/0.01,
+		               loop=0)
+
 				
 	def plot_game(self,path='car_race.gif',imsize=256,car_shape=False):
 		print('rendering ...')
@@ -403,7 +437,7 @@ class Game():
 					winner_car=True
 				else:
 					winner_car=False
-				pil_f=self.put_on_car(pil_f,(max(0,sc[0]),max(sc[1],0)),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)
+				pil_f=self.put_on_car(pil_f,np.array([max(0,sc[0]),max(sc[1],0)]),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)
 			frames.append(reflect_y_axis(pil_f))
 		print(len(frames))
 		frames[0].save(path,
@@ -412,7 +446,8 @@ class Game():
 		               duration=10*self.dt/0.01,
 		               loop=0)
 
-	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_2.png',size_car=16,winner_car=False,car_shape=False):
+	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_1.png',size_car=16,winner_car=False,car_shape=None):
+		position=position.astype(int)
 		winner_weight=0.7
 		car_im = Image.open(path).convert('RGB')
 		map_im=map_im.convert('RGB')
@@ -439,14 +474,16 @@ class Game():
 		for i in range(w):
 			for j in range(h):
 				sp=car_im_px[i,j][0]+car_im_px[i,j][1]+car_im_px[i,j][2]
-				idx_w=int(position[0])-w_2+i
+				# idx_w=int(position[0])-w_2+i
+				idx_w=position[0]-w_2+i
 				idx_w=int(min(max(idx_w,0),W-1))
-				idx_h=int(position[1])-h_2+j
+				# idx_h=int(position[1])-h_2+j
+				idx_h=position[1]-h_2+j
 				idx_h=int(min(max(idx_h,0),H-1))
 				if winner_car:
 					if i==0 or i==w-1 or j==0 or j==h-1:
 						map_im_px[idx_w,idx_h]=(255,215,0)
-				if 10<sp<750 and 0<=idx_w<W and 0<=idx_h<H:
+				if 10<=sp<750 and 0<=idx_w<W and 0<=idx_h<H:
 					if winner_car:
 						map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,215,0])).astype(int))
 					else:

@@ -44,6 +44,24 @@ class Environment_model(nn.Module):
     		out_r[bs,:,:]=self.out_r(unpacked_all_h[bs,:,:])
     	return out_m, out_r, h_last
 
+class Regression_model(nn.Module):
+    def __init__(self,n_layers=1):
+    	super(Regression_model, self).__init__()
+    	self.reg = nn.Sequential()
+    	for i in range(n_layers-1):
+    		self.reg.add_module("layer "+str(i+1),nn.Sequential(nn.Linear(5,5),nn.LeakyReLU()))
+    		print('added layer '+str(i))
+    	self.out_m = nn.Linear(5,3)
+    	self.out_r = nn.Linear(5,1)
+
+    def forward(self,x,h_init=None):
+    	h=self.reg(x)
+    	m=self.out_m(h)
+    	r=self.out_r(h)
+    	return m,r
+
+
+
 
 
 

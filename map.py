@@ -42,7 +42,7 @@ class Map():
     	trace.append((0,0))
     	trace.append((1,0))
     	direction=int(np.random.choice(2, 1))
-    	if direction==0:
+    	if direction==0 and self.size>=3:
     		trace.append((2,0))
     	else:
     		trace.append((1,1))
