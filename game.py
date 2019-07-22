@@ -1,3 +1,5 @@
+import torch
+from torch.autograd import Variable
 import sys
 from copy import deepcopy
 
@@ -274,9 +276,7 @@ class Game():
 					#----sensing the environment-----
 					inputs=self.get_inputs(nc)
 					if get_data:
-						# data[nc][ni][0:3]=inputs[0::2]
 						data_point[0:3]=inputs[0::2]
-						# data_point[0:3]=inputs[0::2]
 					#----decide for action
 					a=self.car_list[nc].get_a(inputs[0::2])
 					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
@@ -354,6 +354,106 @@ class Game():
 			self.winner_car=np.argmax(self.scores)
 		if get_data:
 			return data
+
+	def dream(self,environment_model,c_weight=0.8):
+		print('dreaming...')
+		#torch_input=torch.zeros(1,5)#batchsize=1, sequence_length=1, ds_dim=2+measure_dim=3 = 5
+		sequence_point=np.zeros(6)
+		h_last=None
+		for nc in range(self.n_cars):
+			sequence_point[:3]=self.get_inputs(nc)[0::2]
+			self.car_list[nc].transform_shape()
+			last_c=0
+			c_rot=np.zeros(2)
+			checkpoint_counter=0#first argument is current round, second is the current checkpoint
+			delta=0
+			inputs=np.zeros(self.car_list[nc].n_inputs)
+			longitudinal_car_size=0.5*self.car_list[nc].size*self.car_list[nc].aerodynamic
+			crash=False
+			for ni in range(self.n_iter):
+				if crash:
+					self.positions[nc].append(self.positions[nc][-1])
+					self.orientations[nc].append(self.orientations[nc][-1])
+					self.backward[nc].append(self.backward[nc][-1])
+				else:
+					#----halucinate the environment-----
+					packed_sequences=pack_sequences([[sequence_point]])
+					with torch.no_grad():
+						out_m, out_r, h_last=environment_model(packed_sequences,1,h_init=h_last)
+					inputs=out_m.squeeze()
+					d_score=out_r.squeeze()
+					sequence_point[:3]=inputs
+					sequence_point[3]=d_score
+					#----decide for action
+					a=self.car_list[nc].get_a(inputs)
+					if (self.car_list[nc].v>self.car_list[nc].v_max and a>0) or self.car_list[nc].v<-self.car_list[nc].v_max and a<0:
+						a=0
+					c=c_weight*self.car_list[nc].get_c(inputs)+(1-c_weight)*last_c
+					last_c=c
+					c_rot[0]=-self.orientations[nc][-1][1]
+					c_rot[1]=self.orientations[nc][-1][0]
+
+					#--action----
+					ds=self.orientations[nc][-1]*self.dt*self.car_list[nc].v
+					ds+=c_rot*c*np.linalg.norm(ds)
+					ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
+					norm_ds=np.linalg.norm(ds)+1e-10
+
+					#---check boundary conditions (crash)
+					t_p1,_,d_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
+					t_p2,_,d_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
+					t_list=[t_p1,t_p2]
+					d_list=[d_p1,d_p2]
+					closes_idx=np.argmin(t_list)
+					t_p=t_list[closes_idx]
+					d_p=d_list[closes_idx]
+					if tuple(d_p)==tuple(ds):
+						do=0
+						alpha=0
+					else:
+						alpha=get_angle(d_p,ds)
+						do=0.9*abs((self.car_list[nc].size/2)/np.tan(alpha))
+						if alpha==0:
+							raise ValueError('alpha is zero')
+					if t_p<(norm_ds+longitudinal_car_size+do)/norm_ds:
+						crash=True
+						if ni+1>self.max_frames:
+							self.max_frames=ni+1
+						self.car_list[nc].v=0
+						t_crash=max(0,(t_p*norm_ds-(longitudinal_car_size+do))/norm_ds)
+						ds_crash=self.positions[nc][-1]+t_crash*ds
+						sequence_point[4:]=ds_crash
+						self.positions[nc].append(ds_crash)
+
+					#--update the states
+					else:
+						sequence_point[4:]=ds
+						self.car_list[nc].v+=a*self.dt
+						self.positions[nc].append(self.positions[nc][-1]+ds)
+					if self.car_list[nc].v<0:
+						self.backward[nc].append(True)
+					elif self.car_list[nc].v>0:
+						self.backward[nc].append(False)
+					else:
+						self.backward[nc].append(self.backward[nc][-1])
+					abs_orientation=ds/norm_ds
+					if crash:
+						self.orientations[nc].append(self.orientations[nc][-1])
+					else:
+						if self.backward[nc][-1]:
+							self.orientations[nc].append(-abs_orientation)
+						else:
+							self.orientations[nc].append(abs_orientation)
+					checkpoint,delta=self.get_checkpoint(nc)
+					if np.mod(checkpoint_counter+1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter+=1
+					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
+						checkpoint_counter-=1
+			self.scores[nc]+=checkpoint_counter+delta
+			self.car_list[nc].v=0
+			if self.max_frames==0:
+				self.max_frames=self.n_iter
+			self.winner_car=np.argmax(self.scores)
 
 
 	def get_inputs(self,nc):

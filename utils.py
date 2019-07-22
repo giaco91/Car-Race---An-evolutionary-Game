@@ -177,7 +177,62 @@ def halu_step(shifted_background,scaled_ds,scaled_inputs,scores,prev_orientation
 				car_background_px[idx_w,idx_h]=car_im_px[i,j]
 	return car_background_im, no_car_background_im,current_input_coordinates
 
+def get_reg_data(data):
+	l_tot=0
+	for i in range(len(data)):
+		l_tot+=len(data[i])
+	x=torch.zeros(l_tot,5)
+	t=torch.zeros(l_tot,4)
+	current_l=0
+	for i in range(len(data)):
+		x[current_l:current_l+len(data[i]),:]=torch.from_numpy(np.asarray(data[i])[:,np.array([0,1,2,4,5])])
+		t[current_l:current_l+len(data[i]),:4]=torch.from_numpy(np.asarray(data[i]))[:,:4]
+		current_l+=len(data[i])
+	return x,t
 
+def get_loss(m_hat,r_hat,m,r,batchSize,seq_lengths):
+	loss=0
+	for bs in range(batchSize):
+		dm_bs=m_hat[bs,:seq_lengths[bs],:]-m[bs,:seq_lengths[bs],:]
+		dr_bs=r_hat[bs,:seq_lengths[bs],:]-r[bs,:seq_lengths[bs],:]
+		loss+=(torch.sum(torch.mul(dm_bs,dm_bs))+torch.sum(torch.mul(dr_bs,dr_bs)))/int(seq_lengths[bs])
+	return loss
+
+def get_reg_loss(m_hat,r_hat,m,r):
+	L=m_hat.size(0)
+	d_m=m_hat-m
+	d_r=r_hat-r
+	loss=(torch.sum(torch.mul(d_m,d_m))+torch.sum(torch.mul(d_r,d_r)))/L
+	return loss
+
+def train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200):
+	batch_size=len(data)
+	for i in range(n_epochs):
+		optimizer.zero_grad()
+		packed_sequences=pack_sequences(data)
+		out_m, out_r, h_rare=environment_model(packed_sequences,batch_size)
+		unpacked_sequences,seq_lengths=unpack_sequences(packed_sequences)
+		m=unpacked_sequences[:,:,0:3]
+		r=unpacked_sequences[:,:,3].unsqueeze(2)
+		loss=get_loss(out_m,out_r,m,r,batch_size,seq_lengths)
+		loss.backward()
+		optimizer.step()
+		if i%print_every==0:
+			print('rnn loss: '+str(loss.item()))
+	torch.save({'model_state': environment_model.state_dict(),'optimizer_state': optimizer.state_dict()}, save_path)
+	return environment_model
+
+def train_regression_model(reg_model,optimizer_reg,data,n_epochs=1000,save_path='dream_models/regression_model.pkl',print_every=200):
+	x,t=get_reg_data(data)
+	for i in range(n_epochs):
+		optimizer_reg.zero_grad()
+		m,r=reg_model(x)
+		loss_reg=get_reg_loss(m,r,t[:,0:3],t[:,3].unsqueeze(1))
+		loss_reg.backward()
+		optimizer_reg.step()
+		if i%print_every==0:
+			print('reg loss: '+str(loss_reg.item()))
+	torch.save({'model_state': reg_model.state_dict(),'optimizer_state': optimizer_reg.state_dict()}, save_path)
 
 
 
