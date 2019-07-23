@@ -16,7 +16,7 @@ from utils import *
 
 #–---CAR-----
 class Car():
-	def __init__(self,v_max=5,grip=-0.5,m=1000,F_max=1000,size=0.1,model=2,backward=0.1,n_inputs=6,n_h=3,aerodynamic=1,mutate_physics=False):
+	def __init__(self,v_max=5,grip=-0.5,m=1000,F_max=1000,size=0.08,model=2,backward=0.1,n_inputs=6,n_h=3,aerodynamic=1,mutate_physics=False):
 		self.model=model
 		self.v=0
 		self.F_max=F_max
@@ -48,7 +48,7 @@ class Car():
 			self.shape_mutation()
 
 	def shape_mutation(self,mutation_rate=1):
-		fac=np.random.rand(2)/2+0.75
+		fac=np.random.rand(2)/5+0.9
 		self.grip=min(0,self.grip*fac[0])
 		self.v_max=max(0,self.v_max*fac[1])
 		self.transform_shape()
@@ -86,3 +86,7 @@ class Car():
 		for i in range(self.n_h):
 			s+=self.c_weights[i+1]*h[i]
 		return sigmoid(s,bias=-0.5)*abs(self.v)*np.exp(abs(self.v)*self.grip)
+
+
+
+

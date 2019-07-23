@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 import torchvision
+from torch.nn import functional as F
 import sys
 from copy import deepcopy
-
+import math
 import numpy as np
 from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw
 import PIL
@@ -55,15 +56,17 @@ def rotation(alpha,v):
 	return np.dot(R,v)
 
 def get_angle(v1,v2):
-	return np.arccos(np.dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)))
+	alpha=np.arccos(np.dot(v1,v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)))
+	if math.isnan(alpha):
+		alpha=0#I tont know how else to solve it. if v1 is almost equal to v2 something strange happens and alpha becomes none
+	return alpha
 
 
-def pack_sequences(data):
+def pack_sequences(data,with_alpha=False):
 	#the data is a list of sequences. Every sequence is it self a list of data points.
     #the data must be preprocessed in order to use nn.utils.rnn.pack_padded_sequence
     #sequence size:(batchsize,max_seq_length,data_dim)
     n_sequences=len(data)
-    data_point_dim=2+3#2 for the ds-vector and 3 for the measurment vector
     sequence_lengths=np.zeros(n_sequences).astype(int)
     for i in range(n_sequences):
     	sequence_lengths[i]=int(len(data[i]))
@@ -71,7 +74,11 @@ def pack_sequences(data):
     sorted_sequence_lengths=[]
     data_batch=torch.zeros(n_sequences,sequence_lengths[sorted_idx[-1]],5)
     for i in range(n_sequences):
-    	data_batch[i,0:sequence_lengths[sorted_idx[-1-i]],:]=torch.from_numpy(np.asarray(data[sorted_idx[-1-i]])[:,np.asarray([0,1,2,4,5])])
+    	if with_alpha:
+    		data_idx=np.asarray([0,1,2,4,5,6])
+    	else:
+    		data_idx=np.asarray([0,1,2,4,5])
+    	data_batch[i,0:sequence_lengths[sorted_idx[-1-i]],:]=torch.from_numpy(np.asarray(data[sorted_idx[-1-i]])[:,data_idx])
     	sorted_sequence_lengths.append(sequence_lengths[sorted_idx[-1-i]])
     packed_data_batch = nn.utils.rnn.pack_padded_sequence(data_batch, sorted_sequence_lengths, batch_first=True)
     return packed_data_batch
@@ -126,24 +133,16 @@ def halu_step(shifted_background,scaled_ds,scaled_inputs,scores,prev_orientation
 	draw.ellipse([tuple(c0-dcirc),tuple(c0+dcirc)], fill=(255,0,0), outline=None)
 	draw.ellipse([tuple(c1-dcirc),tuple(c1+dcirc)], fill=(255,0,0), outline=None)
 	draw.ellipse([tuple(c2-dcirc),tuple(c2+dcirc)], fill=(255,0,0), outline=None)
-	if prev_input_coordinates is None:
-		None
-		# car_background_px[int(c0[0]),int(c0[1])]=(255,0,0)
-		# car_background_px[int(c1[0]),int(c1[1])]=(255,0,0)
-		# car_background_px[int(c2[0]),int(c2[1])]=(255,0,0)
-	else:
+	if prev_input_coordinates is not None:
 		prev_input_coordinates[0].append(tuple(c0))
 		prev_input_coordinates[1].append(tuple(c1))
 		prev_input_coordinates[2].append(tuple(c2))
-		# draw.line(prev_input_coordinates[0],fill=(255,100,100),width=1)
-		# draw.line(prev_input_coordinates[1],fill=(255,100,100),width=1)
-		# draw.line(prev_input_coordinates[2],fill=(255,100,100),width=1)
 
 	no_car_background_im=car_background_im.copy()
 
 	ds_norm=np.linalg.norm(scaled_ds)
 	if ds_norm==0:
-		current_orientation=np.array([1,0])
+		current_orientation=prev_orientation
 	else:
 		current_orientation=scaled_ds/ds_norm
 		c0-=scaled_ds
@@ -190,13 +189,93 @@ def get_reg_data(data):
 		current_l+=len(data[i])
 	return x,t
 
-def get_loss(m_hat,r_hat,m,r,batchSize,seq_lengths):
+# def get_ls_loss(m_hat,r_hat,m,r,batchSize,seq_lengths):
+# 	loss=0
+# 	for bs in range(batchSize):
+# 		dm_bs=m_hat[bs,:seq_lengths[bs],:]-m[bs,:seq_lengths[bs],:]
+# 		dr_bs=r_hat[bs,:seq_lengths[bs],:]-r[bs,:seq_lengths[bs],:]
+# 		loss+=(torch.sum(torch.mul(dm_bs,dm_bs))+torch.sum(torch.mul(dr_bs,dr_bs)))/int(seq_lengths[bs])
+# 	return loss
+
+def get_loss(m_hat, r_hat, m, r, batchSize, seq_lengths):
+	m=m.unsqueeze(3)#(batchSize,max_seq_lengths,3,1)
+	r=r.unsqueeze(3)
 	loss=0
+	n_mixtures=int(r_hat.size(2)/3)
+	# print(n_mixtures)
+	# print(m_hat[0,:seq_lengths[0],:3*n_mixtures].size())
+	# print(m_hat.view(batchSize,-1,3,3*n_mixtures).size())
+	m_hat=m_hat.view(batchSize,-1,3,3*n_mixtures)
+	r_hat=r_hat.view(batchSize,-1,1,3*n_mixtures)
+	#----preprocessing
 	for bs in range(batchSize):
-		dm_bs=m_hat[bs,:seq_lengths[bs],:]-m[bs,:seq_lengths[bs],:]
-		dr_bs=r_hat[bs,:seq_lengths[bs],:]-r[bs,:seq_lengths[bs],:]
-		loss+=(torch.sum(torch.mul(dm_bs,dm_bs))+torch.sum(torch.mul(dr_bs,dr_bs)))/int(seq_lengths[bs])
+		m_bs_pi=F.softmax(m_hat[bs,:seq_lengths[bs],:,:n_mixtures],dim=2)
+		r_bs_pi=F.softmax(r_hat[bs,:seq_lengths[bs],:,:n_mixtures],dim=2)
+		m_bs_mu=m_hat[bs,:seq_lengths[bs],:,n_mixtures:2*n_mixtures]#(seq_lengths_bs,3,n_mixtures)
+		r_bs_mu=r_hat[bs,:seq_lengths[bs],:,n_mixtures:2*n_mixtures]
+		m_bs_std=torch.exp(m_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+		r_bs_std=torch.exp(r_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+		m_bs_var=torch.mul(m_bs_std,m_bs_std)
+		r_bs_var=torch.mul(r_bs_std,r_bs_std)
+		#---calculate neg. log-likelihood
+		d_m=m_bs_mu-m[bs,:seq_lengths[bs],:,:]#broadcasting
+		d_r=r_bs_mu-r[bs,:seq_lengths[bs],:,:]#broadcasting
+		exp_m=torch.exp(-torch.div(torch.mul(d_m,d_m),2*m_bs_var))
+		exp_r=torch.exp(-torch.div(torch.mul(d_r,d_r),2*r_bs_var))
+		modes_m=torch.div(exp_m,math.sqrt(2*math.pi)*m_bs_std)
+		modes_r=torch.div(exp_r,math.sqrt(2*math.pi)*r_bs_std)
+		distr_m=torch.sum(torch.mul(modes_m,m_bs_pi),1)
+		distr_r=torch.sum(torch.mul(modes_r,r_bs_pi),1)
+		loss+=(-torch.sum(torch.log(distr_m))-torch.sum(torch.log(distr_r)))/int(seq_lengths[bs])
+
 	return loss
+
+def greedy_ml_sampling(m_hat,r_hat):
+	#m_hat and r_hat must have batch_size=1, that is, the shape (1,seq_length,3 or 1 resp.), where the zeropadding upt to max_seq_lengths must be removed
+	n_mixtures=int(r_hat.size(2)/3)
+	seq_length=int(r_hat.size(1))
+	m_hat=m_hat.view(1,-1,3,3*n_mixtures)
+	r_hat=r_hat.view(1,-1,1,3*n_mixtures)
+	m_mu=m_hat[0,:,:,n_mixtures:2*n_mixtures]#(seq_lengths,3,n_mixtures)
+	r_mu=r_hat[0,:,:,n_mixtures:2*n_mixtures]#(seq_lengths,1,n_mixtures)
+	m_pi=F.softmax(m_hat[0,:,:,:n_mixtures],dim=2)
+	r_pi=F.softmax(r_hat[0,:,:,:n_mixtures],dim=2)
+	m_std=torch.exp(m_hat[0,:,:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+	r_std=torch.exp(r_hat[0,:,:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+	norm_m=m_pi/m_std
+	norm_r=r_pi/r_std
+	amax_idx_m=norm_m.max(2, keepdim=True)[1]
+	amax_idx_r=norm_r.max(2, keepdim=True)[1]
+	return torch.gather(m_mu,2,amax_idx_m), torch.gather(r_mu,2,amax_idx_r)
+
+def mode_sampling(m_hat,r_hat):
+	#m_hat and r_hat must have batch_size=1, that is, the shape (1,seq_length,3 or 1 resp.), where the zeropadding upt to max_seq_lengths must be removed
+	n_mixtures=int(r_hat.size(2)/3)
+	seq_length=int(r_hat.size(1))
+	m_hat=m_hat.view(1,-1,3,3*n_mixtures)
+	r_hat=r_hat.view(1,-1,1,3*n_mixtures)
+	m_mu=m_hat[0,:,:,n_mixtures:2*n_mixtures]#(seq_lengths,3,n_mixtures)
+	r_mu=r_hat[0,:,:,n_mixtures:2*n_mixtures]#(seq_lengths,1,n_mixtures)
+	m_pi=F.softmax(m_hat[0,:,:,:n_mixtures],dim=2)
+	r_pi=F.softmax(r_hat[0,:,:,:n_mixtures],dim=2)
+	m_std=torch.exp(m_hat[0,:,:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+	r_std=torch.exp(r_hat[0,:,:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+	norm_m=m_pi/m_std
+	norm_r=r_pi/r_std
+	s_m=torch.sum(norm_m,2,keepdim=True)
+	s_r=torch.sum(norm_r,2,keepdim=True)
+	norm_pi_m=norm_m/s_m 
+	norm_pi_r=norm_r/s_r
+	idx_m=torch.zeros(seq_length,3,1).long()
+	idx_r=torch.zeros(seq_length,1,1).long()
+	for i in range(seq_length):
+		idx_m[i,0,0]=torch.from_numpy(np.random.choice(n_mixtures, 1, p=norm_pi_m[i,0,:].numpy()))
+		idx_m[i,1,0]=torch.from_numpy(np.random.choice(n_mixtures, 1, p=norm_pi_m[i,1,:].numpy()))
+		idx_m[i,2,0]=torch.from_numpy(np.random.choice(n_mixtures, 1, p=norm_pi_m[i,2,:].numpy()))
+		idx_r[i,0,0]=torch.from_numpy(np.random.choice(n_mixtures, 1, p=norm_pi_r[i,0,:].numpy()))
+	return torch.gather(m_mu,2,idx_m), torch.gather(r_mu,2,idx_r)
+
+
 
 def get_reg_loss(m_hat,r_hat,m,r):
 	L=m_hat.size(0)
@@ -205,7 +284,7 @@ def get_reg_loss(m_hat,r_hat,m,r):
 	loss=(torch.sum(torch.mul(d_m,d_m))+torch.sum(torch.mul(d_r,d_r)))/L
 	return loss
 
-def train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200):
+def train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200,stop_loss=0.0001):
 	batch_size=len(data)
 	for i in range(n_epochs):
 		optimizer.zero_grad()
@@ -218,7 +297,12 @@ def train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_
 		loss.backward()
 		optimizer.step()
 		if i%print_every==0:
-			print('rnn loss: '+str(loss.item()))
+			print('rnn loss '+str(i)+' : '+str(loss.item()))
+		if loss.item()<stop_loss:
+			print('loss smaller than stop_loss -> stop training')
+			torch.save({'model_state': environment_model.state_dict(),'optimizer_state': optimizer.state_dict()}, save_path)
+			return environment_model
+
 	torch.save({'model_state': environment_model.state_dict(),'optimizer_state': optimizer.state_dict()}, save_path)
 	return environment_model
 
@@ -234,5 +318,24 @@ def train_regression_model(reg_model,optimizer_reg,data,n_epochs=1000,save_path=
 			print('reg loss: '+str(loss_reg.item()))
 	torch.save({'model_state': reg_model.state_dict(),'optimizer_state': optimizer_reg.state_dict()}, save_path)
 
-
+def add_alpha_to_data(data):
+	data_point=np.zeros(7)
+	for i in range(len(data)):
+		data_point[:-1]=data[i][0]
+		alpha=0
+		data_point[-1]=alpha
+		data[i][0]=np.copy(data_point)
+		orientation=np.array([1,0])
+		for j in range(1,len(data[i])):
+			data_point[:-1]=data[i][j]
+			if np.linalg.norm(data[i][j][4:])==0:
+				alpha=0
+			else:
+				alpha=get_angle(data[i][j][4:],orientation)
+				if abs(get_angle(rotation(alpha,orientation),data[i][j][4:]))>0.1:
+					alpha=-alpha
+				orientation=data[i][j][4:].copy()
+			data_point[-1]=alpha
+			data[i][j]=np.copy(data_point)
+	return data
 

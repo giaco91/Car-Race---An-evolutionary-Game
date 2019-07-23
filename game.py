@@ -315,7 +315,11 @@ class Game():
 							self.max_frames=ni+1
 						self.car_list[nc].v=0
 						t_crash=max(0,(t_p*norm_ds-(longitudinal_car_size+do))/norm_ds)
-						self.positions[nc].append(self.positions[nc][-1]+t_crash*ds)
+						ds_crash=t_crash*ds
+						self.positions[nc].append(self.positions[nc][-1]+ds_crash)
+						if get_data:
+							data_point[4:]=ds_crash
+
 
 					#--update the states
 					else:
@@ -360,8 +364,15 @@ class Game():
 		#torch_input=torch.zeros(1,5)#batchsize=1, sequence_length=1, ds_dim=2+measure_dim=3 = 5
 		sequence_point=np.zeros(6)
 		h_last=None
+		ds_data=[]
+		score_data=[]
+		input_data=[]
 		for nc in range(self.n_cars):
-			sequence_point[:3]=self.get_inputs(nc)[0::2]
+			ds_data.append([np.zeros(2)])
+			score_data.append([0])
+			initial_inputs=self.get_inputs(nc)[0::2]#we grap the initial (and only the) initial input for convenience (we could also learn it in the environment model)
+			sequence_point[:3]=initial_inputs
+			input_data.append([initial_inputs])
 			self.car_list[nc].transform_shape()
 			last_c=0
 			c_rot=np.zeros(2)
@@ -369,19 +380,27 @@ class Game():
 			delta=0
 			inputs=np.zeros(self.car_list[nc].n_inputs)
 			longitudinal_car_size=0.5*self.car_list[nc].size*self.car_list[nc].aerodynamic
+			diag_car_size=0.5*np.sqrt(2)*self.car_list[nc].size
 			crash=False
 			for ni in range(self.n_iter):
 				if crash:
 					self.positions[nc].append(self.positions[nc][-1])
 					self.orientations[nc].append(self.orientations[nc][-1])
 					self.backward[nc].append(self.backward[nc][-1])
+					ds_data[nc].append(np.zeros(2))
+					score_data[nc].append(0)
+					input_data[nc].append(input_data[nc][-1])
 				else:
 					#----halucinate the environment-----
 					packed_sequences=pack_sequences([[sequence_point]])
 					with torch.no_grad():
 						out_m, out_r, h_last=environment_model(packed_sequences,1,h_init=h_last)
-					inputs=out_m.squeeze()
-					d_score=out_r.squeeze()
+					sampled_m,sampled_r=greedy_ml_sampling(out_m,out_r)
+					# sampled_m,sampled_r=mode_sampling(out_m,out_r)
+					inputs=sampled_m.squeeze().numpy()
+					d_score=sampled_r.squeeze().numpy()
+					input_data[nc].append(inputs)
+					score_data[nc].append(d_score)
 					sequence_point[:3]=inputs
 					sequence_point[3]=d_score
 					#----decide for action
@@ -400,36 +419,25 @@ class Game():
 					norm_ds=np.linalg.norm(ds)+1e-10
 
 					#---check boundary conditions (crash)
-					t_p1,_,d_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
-					t_p2,_,d_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
-					t_list=[t_p1,t_p2]
-					d_list=[d_p1,d_p2]
-					closes_idx=np.argmin(t_list)
-					t_p=t_list[closes_idx]
-					d_p=d_list[closes_idx]
-					if tuple(d_p)==tuple(ds):
-						do=0
-						alpha=0
-					else:
-						alpha=get_angle(d_p,ds)
-						do=0.9*abs((self.car_list[nc].size/2)/np.tan(alpha))
-						if alpha==0:
-							raise ValueError('alpha is zero')
-					if t_p<(norm_ds+longitudinal_car_size+do)/norm_ds:
+					do=0
+					if inputs[0]<norm_ds+longitudinal_car_size+do or inputs[1]<diag_car_size or inputs[2]<=diag_car_size:
 						crash=True
 						if ni+1>self.max_frames:
 							self.max_frames=ni+1
 						self.car_list[nc].v=0
-						t_crash=max(0,(t_p*norm_ds-(longitudinal_car_size+do))/norm_ds)
-						ds_crash=self.positions[nc][-1]+t_crash*ds
+						t_crash=max(0,(inputs[0]-(longitudinal_car_size+do)))
+						ds_crash=t_crash*ds/norm_ds
+						position_crash=self.positions[nc][-1]+ds_crash
 						sequence_point[4:]=ds_crash
-						self.positions[nc].append(ds_crash)
+						self.positions[nc].append(position_crash)
+						ds_data[nc].append(np.zeros(2))
 
 					#--update the states
 					else:
 						sequence_point[4:]=ds
 						self.car_list[nc].v+=a*self.dt
 						self.positions[nc].append(self.positions[nc][-1]+ds)
+						ds_data[nc].append(ds)
 					if self.car_list[nc].v<0:
 						self.backward[nc].append(True)
 					elif self.car_list[nc].v>0:
@@ -454,6 +462,7 @@ class Game():
 			if self.max_frames==0:
 				self.max_frames=self.n_iter
 			self.winner_car=np.argmax(self.scores)
+		return ds_data,input_data,score_data
 
 
 	def get_inputs(self,nc):
@@ -499,22 +508,24 @@ class Game():
 			car_size=int(max(1,car.size*scale))
 			if car_shape:
 				car_shape=car.aerodynamic
+		prev_orientation=np.array([1,0])
 		for n in range(1,len(ds)):
 			prev_ds_norm=np.linalg.norm(ds[n-1])
 			if prev_ds_norm==0:
-				prev_orientation=np.array([1,0])
+				orientation=prev_orientation
 			else:
-				prev_orientation=ds[n-1]/prev_ds_norm
+				orientation=ds[n-1]/prev_ds_norm
+				prev_orientation=np.copy(orientation)
 			scaled_ds=scale*ds[n]
 			scaled_inputs=scale*inputs[n]
-			pil_f,non_shifted_background_im,current_input_coordinates=halu_step(background_im,scaled_ds,scaled_inputs,scores,prev_orientation,size_car=car_size,car_shape=car_shape,prev_input_coordinates=current_input_coordinates)
+			pil_f,non_shifted_background_im,current_input_coordinates=halu_step(background_im,scaled_ds,scaled_inputs,scores,orientation,size_car=car_size,car_shape=car_shape,prev_input_coordinates=current_input_coordinates)
 			background_im=get_shifted_background(non_shifted_background_im.copy(),scaled_ds)
 			frames.append(reflect_y_axis(pil_f))
 		print(len(frames))
 		frames[0].save(path,
 		               save_all=True,
 		               append_images=frames[1:],
-		               duration=30*self.dt/0.01,
+		               duration=20*self.dt/0.01,
 		               loop=0)
 
 				
@@ -599,7 +610,7 @@ class Game():
 		mutation_rate=[]
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
-			mutation_rate.append(mut_fac+100/(1+self.scores[sorted_idx[-1-i]]))
+			mutation_rate.append(mut_fac+50/(1+self.scores[sorted_idx[-1-i]]))
 
 		print('aerodynamic: '+str(selected_cars[0].aerodynamic))
 		print('size: '+str(selected_cars[0].size))
