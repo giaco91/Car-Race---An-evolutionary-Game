@@ -105,7 +105,7 @@ else:
 
 
 
-environment_model=Environment_model(n_layers=1,depth=3)
+environment_model=Environment_model(n_layers=2,depth=3,h_dim=10)
 reg_model=Regression_model(n_layers=1)
 optimizer= torch.optim.Adam(environment_model.parameters(), lr=0.0002)
 optimizer_reg=torch.optim.Adam(reg_model.parameters(),lr=0.0002)
@@ -125,24 +125,21 @@ for g in range(N_gen):
 		game=Game(race_map_list[m],cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
 		game.scores=scores
 		data=game.max_rounds_race_shape(get_data=True)
+		game.plot_game(imsize=int(40*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
 		scores=game.scores
-		# l=len(data[0])
-		# print(l)
-		# car_data=np.zeros((l,6))
-		# for i in range(l):
-		# 	car_data[i,:]=data[0][i]
-		# game.plot_halucination(car_data[:,4:],car_data[:,0:3],car_data[:,3],imsize=200,path='gifs/halu.gif',car=game.car_list[0],car_shape=True)
-		# environment_model=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=20,stop_loss=-1000)
-		# game.plot_game(imsize=int(40*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
+		plot_car_perspective(data[0],game,game.car_list[0])
+		data=transform_data_to_alpha_and_norm(data)
+		# environment_model, optimizer=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200,stop_loss=-90)
+		ds_data,input_data,score_data=game.dream(environment_model)
+		game.plot_halucination(ds_data[0][0:90],input_data[0][0:90],score_data[0][0:90],imsize=130,path='gifs/halu.gif',car=game.car_list[0],car_shape=True)
 	# cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=True,mut_fac=1)
 	scores=np.zeros(n_cars)
 
-
+# data=transform_data_to_alpha_and_norm(data)
 # environment_model=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=100,stop_loss=-130)
-data=add_alpha_to_data(data)
+
 # game=Game(race_map_list[0],cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
 # ds_data,input_data,score_data=game.dream(environment_model)
-
 # game.plot_halucination(ds_data[0][0:150],input_data[0][0:150],score_data[0][0:150],imsize=130,path='gifs/halu.gif',car=game.car_list[0],car_shape=True)
 
 

@@ -248,6 +248,16 @@ class Game():
 
 	def max_rounds_race_shape(self,c_weight=0.8,get_data=False):
 		print('simulate race...')
+		self.positions=[]
+		self.orientations=[]
+		self.backward=[]
+		self.scores=np.zeros(self.n_cars)
+		self.max_frames=0
+		self.winner_car=None
+		for nc in range(self.n_cars):
+			self.positions.append([np.array([0.5,0])])
+			self.orientations.append([np.array([1,0])])
+			self.backward.append([False])
 		if get_data:
 			data=[]#list of sequences, where each sequence point contains the information (measurement/inputs,d_score,action)
 		for nc in range(self.n_cars):
@@ -293,6 +303,7 @@ class Game():
 					ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
 					norm_ds=np.linalg.norm(ds)+1e-10
 
+
 					#---check boundary conditions (crash)
 					t_p1,_,d_p1,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border1,get_also_directions=True)
 					t_p2,_,d_p2,_=self.map.closest_intersection(self.positions[nc][-1],ds,self.map.border2,get_also_directions=True)
@@ -305,7 +316,7 @@ class Game():
 						do=0
 						alpha=0
 					else:
-						alpha=get_angle(d_p,ds)
+						alpha=angle_between(d_p,ds)
 						do=0.9*abs((self.car_list[nc].size/2)/np.tan(alpha))
 						if alpha==0:
 							raise ValueError('alpha is zero')
@@ -359,15 +370,27 @@ class Game():
 		if get_data:
 			return data
 
-	def dream(self,environment_model,c_weight=0.8):
+	def dream(self,environment_model,c_weight=0.8,best_car_only=True):
 		print('dreaming...')
-		#torch_input=torch.zeros(1,5)#batchsize=1, sequence_length=1, ds_dim=2+measure_dim=3 = 5
+		self.positions=[]
+		self.orientations=[]
+		self.backward=[]
+		self.scores=np.zeros(self.n_cars)
+		self.max_frames=0
+		self.winner_car=None
+		for nc in range(self.n_cars):
+			self.positions.append([np.array([0.5,0])])
+			self.orientations.append([np.array([1,0])])
+			self.backward.append([False])
 		sequence_point=np.zeros(6)
 		h_last=None
 		ds_data=[]
 		score_data=[]
 		input_data=[]
-		for nc in range(self.n_cars):
+		n_iter=self.n_cars
+		if best_car_only:
+			n_iter=1
+		for nc in range(n_iter):
 			ds_data.append([np.zeros(2)])
 			score_data.append([0])
 			initial_inputs=self.get_inputs(nc)[0::2]#we grap the initial (and only the) initial input for convenience (we could also learn it in the environment model)
@@ -395,8 +418,8 @@ class Game():
 					packed_sequences=pack_sequences([[sequence_point]])
 					with torch.no_grad():
 						out_m, out_r, h_last=environment_model(packed_sequences,1,h_init=h_last)
-					sampled_m,sampled_r=greedy_ml_sampling(out_m,out_r)
-					# sampled_m,sampled_r=mode_sampling(out_m,out_r)
+					# sampled_m,sampled_r=greedy_ml_sampling(out_m,out_r)
+					sampled_m,sampled_r=mode_sampling(out_m,out_r)
 					inputs=sampled_m.squeeze().numpy()
 					d_score=sampled_r.squeeze().numpy()
 					input_data[nc].append(inputs)
@@ -417,8 +440,7 @@ class Game():
 					ds+=c_rot*c*np.linalg.norm(ds)
 					ds+=self.orientations[nc][-1]*0.5*a*self.dt**2
 					norm_ds=np.linalg.norm(ds)+1e-10
-
-					#---check boundary conditions (crash)
+					# ---check boundary conditions (crash)
 					do=0
 					if inputs[0]<norm_ds+longitudinal_car_size+do or inputs[1]<diag_car_size or inputs[2]<=diag_car_size:
 						crash=True
@@ -457,11 +479,11 @@ class Game():
 						checkpoint_counter+=1
 					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
 						checkpoint_counter-=1
-			self.scores[nc]+=checkpoint_counter+delta
+			# self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
-			if self.max_frames==0:
-				self.max_frames=self.n_iter
-			self.winner_car=np.argmax(self.scores)
+			# if self.max_frames==0:
+			# 	self.max_frames=self.n_iter
+			# self.winner_car=np.argmax(self.scores)
 		return ds_data,input_data,score_data
 
 

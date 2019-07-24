@@ -22,6 +22,10 @@ def create_image(i, j):
 	image = Image.new("RGB", (i, j), "white")
 	return image
 
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
 def sigmoid(s,bias=0):
 	return 1/(1+np.exp(-s))+bias
 
@@ -60,6 +64,20 @@ def get_angle(v1,v2):
 	if math.isnan(alpha):
 		alpha=0#I tont know how else to solve it. if v1 is almost equal to v2 something strange happens and alpha becomes none
 	return alpha
+
+def angle_between(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
 
 
 def pack_sequences(data,with_alpha=False):
@@ -202,9 +220,6 @@ def get_loss(m_hat, r_hat, m, r, batchSize, seq_lengths):
 	r=r.unsqueeze(3)
 	loss=0
 	n_mixtures=int(r_hat.size(2)/3)
-	# print(n_mixtures)
-	# print(m_hat[0,:seq_lengths[0],:3*n_mixtures].size())
-	# print(m_hat.view(batchSize,-1,3,3*n_mixtures).size())
 	m_hat=m_hat.view(batchSize,-1,3,3*n_mixtures)
 	r_hat=r_hat.view(batchSize,-1,1,3*n_mixtures)
 	#----preprocessing
@@ -220,14 +235,20 @@ def get_loss(m_hat, r_hat, m, r, batchSize, seq_lengths):
 		#---calculate neg. log-likelihood
 		d_m=m_bs_mu-m[bs,:seq_lengths[bs],:,:]#broadcasting
 		d_r=r_bs_mu-r[bs,:seq_lengths[bs],:,:]#broadcasting
+		# print(m_bs_mu[0:2,:,:])
+		# print(m[bs,0:2])
+		# print(m_bs_std[0:2,:,:])
+		# print(m_bs_pi[0:2,:,:])
+		# print(d_m[0:2,:,:])
 		exp_m=torch.exp(-torch.div(torch.mul(d_m,d_m),2*m_bs_var))
 		exp_r=torch.exp(-torch.div(torch.mul(d_r,d_r),2*r_bs_var))
 		modes_m=torch.div(exp_m,math.sqrt(2*math.pi)*m_bs_std)
 		modes_r=torch.div(exp_r,math.sqrt(2*math.pi)*r_bs_std)
-		distr_m=torch.sum(torch.mul(modes_m,m_bs_pi),1)
+		distr_m=torch.sum(torch.mul(modes_m,m_bs_pi),2)
+		# print(distr_m[0:2,:])
 		distr_r=torch.sum(torch.mul(modes_r,r_bs_pi),1)
-		loss+=(-torch.sum(torch.log(distr_m))-torch.sum(torch.log(distr_r)))/int(seq_lengths[bs])
-
+		loss+=(-torch.sum(torch.log(distr_m+1e-10))-torch.sum(torch.log(distr_r+1e-10)))/int(seq_lengths[bs])
+		# raise ValueError('asdf')
 	return loss
 
 def greedy_ml_sampling(m_hat,r_hat):
@@ -285,26 +306,39 @@ def get_reg_loss(m_hat,r_hat,m,r):
 	return loss
 
 def train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200,stop_loss=0.0001):
-	batch_size=len(data)
+	total_batch_size=len(data)
+	test_data=data[2*int(total_batch_size/3):]
+	train_data=data[0:2*int(total_batch_size)]
+	train_batch_size=len(train_data)
+	test_batch_size=len(test_data)
+	# print(train_data[0][0])
 	for i in range(n_epochs):
 		optimizer.zero_grad()
-		packed_sequences=pack_sequences(data)
-		out_m, out_r, h_rare=environment_model(packed_sequences,batch_size)
+		packed_sequences=pack_sequences(train_data)
+		out_m, out_r, h_rare=environment_model(packed_sequences,train_batch_size)
 		unpacked_sequences,seq_lengths=unpack_sequences(packed_sequences)
 		m=unpacked_sequences[:,:,0:3]
 		r=unpacked_sequences[:,:,3].unsqueeze(2)
-		loss=get_loss(out_m,out_r,m,r,batch_size,seq_lengths)
+		loss=get_loss(out_m,out_r,m,r,train_batch_size,seq_lengths)
 		loss.backward()
 		optimizer.step()
 		if i%print_every==0:
-			print('rnn loss '+str(i)+' : '+str(loss.item()))
+			print('train loss: '+str(i)+' : '+str(loss.item()))
+			with torch.no_grad():
+				packed_sequences=pack_sequences(test_data)
+				out_m, out_r, h_rare=environment_model(packed_sequences,test_batch_size)
+				unpacked_sequences,seq_lengths=unpack_sequences(packed_sequences)
+				m=unpacked_sequences[:,:,0:3]
+				r=unpacked_sequences[:,:,3].unsqueeze(2)
+				test_loss=get_loss(out_m,out_r,m,r,test_batch_size,seq_lengths)
+				print('test loss: '+str(i)+' : '+str(test_loss.item()))
+
 		if loss.item()<stop_loss:
 			print('loss smaller than stop_loss -> stop training')
 			torch.save({'model_state': environment_model.state_dict(),'optimizer_state': optimizer.state_dict()}, save_path)
 			return environment_model
-
 	torch.save({'model_state': environment_model.state_dict(),'optimizer_state': optimizer.state_dict()}, save_path)
-	return environment_model
+	return environment_model, optimizer
 
 def train_regression_model(reg_model,optimizer_reg,data,n_epochs=1000,save_path='dream_models/regression_model.pkl',print_every=200):
 	x,t=get_reg_data(data)
@@ -318,24 +352,40 @@ def train_regression_model(reg_model,optimizer_reg,data,n_epochs=1000,save_path=
 			print('reg loss: '+str(loss_reg.item()))
 	torch.save({'model_state': reg_model.state_dict(),'optimizer_state': optimizer_reg.state_dict()}, save_path)
 
-def add_alpha_to_data(data):
-	data_point=np.zeros(7)
+def transform_data_to_alpha_and_norm(data):
+	data_point=np.zeros(6)
 	for i in range(len(data)):
-		data_point[:-1]=data[i][0]
+		data_point[:-2]=data[i][0][:-2]
 		alpha=0
+		ds_norm=0
+		data_point[-2]=ds_norm
 		data_point[-1]=alpha
 		data[i][0]=np.copy(data_point)
 		orientation=np.array([1,0])
 		for j in range(1,len(data[i])):
-			data_point[:-1]=data[i][j]
-			if np.linalg.norm(data[i][j][4:])==0:
+			data_point[:-2]=data[i][j][:-2]
+			ds_norm=np.linalg.norm(data[i][j][4:])
+			if ds_norm==0:
 				alpha=0
 			else:
-				alpha=get_angle(data[i][j][4:],orientation)
-				if abs(get_angle(rotation(alpha,orientation),data[i][j][4:]))>0.1:
+				alpha=angle_between(data[i][j][4:], orientation)
+				if abs(angle_between(rotation(alpha,orientation),data[i][j][4:]))>0.0001:
 					alpha=-alpha
 				orientation=data[i][j][4:].copy()
+			data_point[-2]=ds_norm
 			data_point[-1]=alpha
 			data[i][j]=np.copy(data_point)
 	return data
+
+def plot_car_perspective(data_one_car,game,car):
+	#data must be the data for only one car!
+	l=len(data_one_car)
+	car_data=np.zeros((l,6))
+	for i in range(l):
+		car_data[i,:]=data_one_car[i]
+	game.plot_halucination(car_data[:90,4:],car_data[:90,0:3],car_data[:90,3],imsize=110,path='gifs/car_perspective.gif',car=car,car_shape=True)
+
+
+
+
 
