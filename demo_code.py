@@ -65,7 +65,7 @@ else:
 # race_map_list=[Map(size=3),Map(size=4),Map(size=5),Map(size=6),Map(size=7),Map(size=8)]
 # race_map_list=[Map(size=4),Map(size=4),Map(size=4),Map(size=4),Map(size=4)]
 race_map_list=[]
-n_race_maps=1
+n_race_maps=15
 size=opt.map_size
 if size>=5:
 	min_points=20
@@ -87,11 +87,18 @@ while len(race_map_list)<=n_race_maps-1 and k<100:
 
 
 
-# for j in range(len(race_map_list)):
-# 	# race_map_list[j].draw_map()
-# 	race_map_list[j].draw_skeleton(imsize=500,save_path='map_figures/skelets/skelet_s='+str(size)+'_'+str(j)+'.png',show=False)
-# 	race_map_list[j].draw_map(imsize=500,save_path='map_figures/colored/map_s='+str(size)+'_'+str(j)+'.png',show=False)
+for j in range(len(race_map_list)):
+	# race_map_list[j].draw_map()
+	# race_map_list[j].draw_skeleton(imsize=500,save_path='video_figures/skelets/skelet_s='+str(size)+'_'+str(j)+'.png',show=False)
+	# race_map_list[j].draw_map(imsize=500,save_path='video_figures/colored/map_s='+str(size)+'_'+str(j)+'.png',show=False)
+	# race_map_list[j].draw_map(imsize=500,show=True)
+	pass
 
+
+
+
+
+race_map_list[0]=race_map_list[-5]
 
 #load
 if load_car:
@@ -160,7 +167,7 @@ car_shape=True
 # 	winner_car=False
 # 	pil_f=put_on_car(pil_f,np.array([max(0,sc[0]),max(sc[1],0)]),orientation,False,size_car=int(max(1,car.size*scale)),path='cars/car_'+str(car.model)+'.png',winner_car=winner_car,car_shape=car_shape)
 # 	# reflect_y_axis(pil_f).show()
-# 	reflect_y_axis(pil_f).save('map_figures/images/car_on_map.png',format='png')
+# 	reflect_y_axis(pil_f).save('video_figures/images/car_on_map.png',format='png')
 # 	#-----measure
 # 	draw = ImageDraw.Draw(pil_f)
 # 	inputs=get_inputs(orientation,position,map)
@@ -184,19 +191,18 @@ car_shape=True
 # 		font = ImageFont.truetype("arial.ttf", int(40*imsize/1000))
 # 		draw.text((int(0.5*imsize),int(0.2*imsize+dy)), text[k], font=font, fill=(0,0,0))
 # 		dy+=1.1*font.getsize(text[k])[1]
-# 	pil_f.save('map_figures/images/car_measure_'+str(i)+'.png',format='png')
+# 	pil_f.save('video_figures/images/car_measure_'+str(i)+'.png',format='png')
 
 scores=np.zeros(n_cars)
+race_map=race_map_list[0]
 for g in range(N_gen):
 	print('Race: '+str(g+1))
-	for m in range(len(race_map_list)):
-		print('map: '+str(m+1))
-		game=Game(race_map_list[m],cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
-		game.scores=scores
-		game.max_rounds_race_only_front_sight()
-		# game.max_rounds_race_shape()
-		game.plot_game(imsize=int(100*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=car_shape)
-		scores=game.scores
+	game=Game(race_map,cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
+	game.scores=scores
+	game.max_rounds_race_only_front_sight()
+	# game.max_rounds_race_shape()
+	game.plot_game(imsize=int(50*np.sqrt(race_map.size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(opt.map_size)+'.gif',car_shape=car_shape)
+	scores=game.scores
 	cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=False,mut_fac=1)
 	scores=np.zeros(n_cars)
 

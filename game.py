@@ -594,28 +594,43 @@ class Game():
 				dy+=1.1*font.getsize(text[k])[1]
 			#---- draw neural network
 			dcirc=0.03*imsize
+			x_coord=0.1*imsize
+			y_coord=0.3*imsize
+			for k in range(self.car_list[self.winner_car].n_inputs):
+				for l in range(self.car_list[self.winner_car].n_h):
+					draw.line([(int(0.1*imsize),int(0.3*imsize+3*k*dcirc)),(int(0.3*imsize),int(0.3*imsize+3*l*dcirc))],fill=(0,0,0),width=1)
+			for l in range(self.car_list[self.winner_car].n_h):
+				for m in range(2):
+					draw.line([(int(0.3*imsize),int(0.3*imsize+3*l*dcirc)),(int(0.5*imsize),int(0.3*imsize+3*m*dcirc))],fill=(0,0,0),width=1)
 			for k in range(self.car_list[self.winner_car].n_inputs):
 				activation=min(np.sqrt(self.activations_of_best_car[draw_ni][0][k]),2)/2
-				print(activation)
 				color=(255,int(255*(1-activation)),int(255*(1-activation)))
-				draw.ellipse([(int(0.1*imsize-dcirc),int(0.3*imsize-dcirc+3*k*dcirc)),(int(0.1*imsize+dcirc),int(0.3*imsize+dcirc+3*k*dcirc))], fill=color, outline=(0,0,0))
-			for l in range(self.car_list[nc].n_h):
+				size_fac=(0.5+activation/2)
+				draw.ellipse([(int(x_coord-size_fac*dcirc),int(y_coord-size_fac*dcirc+3*k*dcirc)),(int(x_coord+size_fac*dcirc),int(y_coord+size_fac*dcirc+3*k*dcirc))], fill=color, outline=(0,0,0))
+			x_coord=0.3*imsize
+			for l in range(self.car_list[self.winner_car].n_h):
 				activation=self.activations_of_best_car[draw_ni][1][l]
+				size_fac=(0.5+activation/2)
 				color=(255,int(255*(1-activation)),int(255*(1-activation)))
-				draw.ellipse([(int(0.3*imsize-dcirc),int(0.3*imsize-dcirc+3*l*dcirc)),(int(0.3*imsize+dcirc),int(0.3*imsize+dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
+				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*l*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+activation*dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
+			x_coord=0.5*imsize
 			for m in range(2):
-				activation=self.activations_of_best_car[draw_ni][2][m]
+				activation=min(1,max(-1,3*self.activations_of_best_car[draw_ni][2][m]))
 				if m==0:
-					text='acceleration='+str(activation)[:4]
+					text='force='+str(activation)[:4]
 				else:
 					text='curve='+str(activation)[:4]
 				if activation>0:
+					size_fac=(0.5+activation/2)
 					color=(255,int(255*(1-activation)),int(255*(1-activation)))
 				else:
+					size_fac=(0.5-activation/2)
 					color=(int(-255*activation),int(-255*activation),255)
-				draw.ellipse([(int(0.5*imsize-dcirc),int(0.3*imsize-dcirc+3*m*dcirc)),(int(0.5*imsize+dcirc),int(0.3*imsize+dcirc+3*m*dcirc))], fill=color, outline=(0,0,0))
+				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*m*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+size_fac*dcirc+3*m*dcirc))], fill=color, outline=(0,0,0))
 				font = ImageFont.truetype("arial.ttf", int(70*imsize/1000))
-				draw.text((int(0.5*imsize+3*dcirc),int(0.3*imsize+3*m*dcirc-1*dcirc)), text, font=font, fill=(0,0,0))					
+				draw.text((int(0.5*imsize+3*dcirc),int(0.3*imsize+3*m*dcirc-1.2*dcirc)), text, font=font, fill=(0,0,0))
+
+
 			frames.append(pil_f)
 		print('amount of frames: '+str(len(frames)))
 		frames[0].save(path,
