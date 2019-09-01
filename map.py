@@ -114,42 +114,48 @@ class Map():
     	else:
     		return t_pos,t_neg
 
-    def draw_skeleton(self,skeleton=None,imsize=256):
-    	#skeleton is an (ordered) list of coordinates
-    	if skeleton is None:
-    		skeleton=self.skeleton
-    	scale=imsize/(self.size-1)
-    	border=int(scale/3)
-    	width=int(imsize/100)
-    	im=create_image(imsize+2*border,imsize+2*border)
-    	draw = ImageDraw.Draw(im)
-    	coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
-    	draw.line(coordinates,fill=(0,0,255),width=width)
-    	reflect_y_axis(im).show()
+    def draw_skeleton(self,skeleton=None,imsize=256,save_path=None,show=True):
+    #skeleton is an (ordered) list of coordinates
+        if skeleton is None:
+            skeleton=self.skeleton
+        scale=imsize/(self.size-1)
+        border=int(scale/3)
+        width=int(imsize/100)
+        im=create_image(imsize+2*border,imsize+2*border)
+        draw = ImageDraw.Draw(im)
+        coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
+        draw.line(coordinates,fill=(0,0,255),width=width)
+        im=reflect_y_axis(im)
+        if show:
+            im.show()
+        if save_path is not None:
+            im.save(save_path,format='png')
 
-    def draw_map(self,skeleton=None,imsize=256,show=True,border_frac=3):
-    	if skeleton is None:
-    		skeleton=self.skeleton
-    	scale=imsize/(self.size-1)
-    	border=int(scale/border_frac)
-    	width=int(imsize/100)
-    	im=create_image(imsize+2*border,imsize+2*border)
-    	W,H=im.size
-    	px_im=im.load()
-    	for w in range(W):
-    		for h in range(H):
-    			px_im[w,h]=(0,200,0)
-    	draw = ImageDraw.Draw(im)
-    	cb1,cb2=self.get_border_coordinates(skeleton=skeleton)
-    	coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
-    	ccb1=[tuple(scale*c+border for c in t) for t in cb1]
-    	ccb2=[tuple(scale*c+border for c in t) for t in cb2]
-    	draw.line(coordinates,fill=(190,190,190),width=int(2*border))
-    	draw.line(ccb1,fill=(200,0,50),width=width)
-    	draw.line(ccb2,fill=(200,0,50),width=width)
-    	if show:
-    		reflect_y_axis(im).show()
-    	return cb1,cb2,im
+    def draw_map(self,skeleton=None,imsize=256,show=True,border_frac=3,save_path=None):
+        if skeleton is None:
+            skeleton=self.skeleton
+        scale=imsize/(self.size-1)
+        border=int(scale/border_frac)
+        width=int(imsize/100)
+        im=create_image(imsize+2*border,imsize+2*border)
+        W,H=im.size
+        px_im=im.load()
+        for w in range(W):
+            for h in range(H):
+                px_im[w,h]=(0,200,0)
+        draw = ImageDraw.Draw(im)
+        cb1,cb2=self.get_border_coordinates(skeleton=skeleton)
+        coordinates=[tuple(scale*c+border for c in t) for t in skeleton]
+        ccb1=[tuple(scale*c+border for c in t) for t in cb1]
+        ccb2=[tuple(scale*c+border for c in t) for t in cb2]
+        draw.line(coordinates,fill=(190,190,190),width=int(2*border))
+        draw.line(ccb1,fill=(200,0,50),width=width)
+        draw.line(ccb2,fill=(200,0,50),width=width)
+        if show:
+            reflect_y_axis(im).show()
+        if save_path is not None:
+            reflect_y_axis(im).save(save_path,format='png')
+        return cb1,cb2,im
 
 
 

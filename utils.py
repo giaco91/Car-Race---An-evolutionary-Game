@@ -6,7 +6,7 @@ import sys
 from copy import deepcopy
 import math
 import numpy as np
-from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw
+from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw, ImageFont
 import PIL
 import numpy as np
 import pickle
@@ -228,27 +228,20 @@ def get_loss(m_hat, r_hat, m, r, batchSize, seq_lengths):
 		r_bs_pi=F.softmax(r_hat[bs,:seq_lengths[bs],:,:n_mixtures],dim=2)
 		m_bs_mu=m_hat[bs,:seq_lengths[bs],:,n_mixtures:2*n_mixtures]#(seq_lengths_bs,3,n_mixtures)
 		r_bs_mu=r_hat[bs,:seq_lengths[bs],:,n_mixtures:2*n_mixtures]
-		m_bs_std=torch.exp(m_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
-		r_bs_std=torch.exp(r_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures])+1e-10#add small constant to prevent mode collapse
+		m_bs_std=torch.exp(torch.clamp(m_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures],max=10))+1e-10#add small constant to prevent mode collapse
+		r_bs_std=torch.exp(torch.clamp(r_hat[bs,:seq_lengths[bs],:,2*n_mixtures:3*n_mixtures],max=10))+1e-10#add small constant to prevent mode collapse
 		m_bs_var=torch.mul(m_bs_std,m_bs_std)
 		r_bs_var=torch.mul(r_bs_std,r_bs_std)
 		#---calculate neg. log-likelihood
 		d_m=m_bs_mu-m[bs,:seq_lengths[bs],:,:]#broadcasting
 		d_r=r_bs_mu-r[bs,:seq_lengths[bs],:,:]#broadcasting
-		# print(m_bs_mu[0:2,:,:])
-		# print(m[bs,0:2])
-		# print(m_bs_std[0:2,:,:])
-		# print(m_bs_pi[0:2,:,:])
-		# print(d_m[0:2,:,:])
 		exp_m=torch.exp(-torch.div(torch.mul(d_m,d_m),2*m_bs_var))
 		exp_r=torch.exp(-torch.div(torch.mul(d_r,d_r),2*r_bs_var))
 		modes_m=torch.div(exp_m,math.sqrt(2*math.pi)*m_bs_std)
 		modes_r=torch.div(exp_r,math.sqrt(2*math.pi)*r_bs_std)
 		distr_m=torch.sum(torch.mul(modes_m,m_bs_pi),2)
-		# print(distr_m[0:2,:])
 		distr_r=torch.sum(torch.mul(modes_r,r_bs_pi),1)
-		loss+=(-torch.sum(torch.log(distr_m+1e-10))-torch.sum(torch.log(distr_r+1e-10)))/int(seq_lengths[bs])
-		# raise ValueError('asdf')
+		loss+=(-torch.sum(torch.log(distr_m))-torch.sum(torch.log(distr_r)))/int(seq_lengths[bs])
 	return loss
 
 def greedy_ml_sampling(m_hat,r_hat):
@@ -386,6 +379,48 @@ def plot_car_perspective(data_one_car,game,car):
 	game.plot_halucination(car_data[:90,4:],car_data[:90,0:3],car_data[:90,3],imsize=110,path='gifs/car_perspective.gif',car=car,car_shape=True)
 
 
-
+def put_on_car(map_im,position,orientation,backward,path='cars/car_1.png',size_car=16,winner_car=False,car_shape=None):
+	position=position.astype(int)
+	winner_weight=0.7
+	car_im = Image.open(path).convert('RGB')
+	map_im=map_im.convert('RGB')
+	phi=np.arctan(orientation[0]/(orientation[1]+1e-10))*360/(2*np.pi)+180#need to add 180 because show() has y-coordinate southwards
+	if orientation[1]<0:
+		phi+=180
+	if car_shape is not None:
+		if size_car<=0:
+			print('size_car is smaller or equal to zero: '+str(size_car))
+		if int(size_car*car_shape)<=0:
+			print('size_car times car_shape is smaller or equal to zero: '+str(int(size_car*car_shape)))
+		car_im=resize(car_im,size_car,int(size_car*car_shape))
+	else:
+		car_im=resize_to_height_ref(car_im,size_car)
+	car_im=car_im.rotate(phi, expand=True)
+	#rotate(phi+180, expand=True)
+	w,h=car_im.size
+	W,H=map_im.size
+	w_2=int(w/2)
+	h_2=int(h/2)
+	car_im_px=car_im.load()
+	map_im_px=map_im.load()
+	winner_idx=np.zeros(4)
+	for i in range(w):
+		for j in range(h):
+			sp=car_im_px[i,j][0]+car_im_px[i,j][1]+car_im_px[i,j][2]
+			# idx_w=int(position[0])-w_2+i
+			idx_w=position[0]-w_2+i
+			idx_w=int(min(max(idx_w,0),W-1))
+			# idx_h=int(position[1])-h_2+j
+			idx_h=position[1]-h_2+j
+			idx_h=int(min(max(idx_h,0),H-1))
+			if winner_car:
+				if i==0 or i==w-1 or j==0 or j==h-1:
+					map_im_px[idx_w,idx_h]=(255,215,0)
+			if 10<=sp<700 and 0<=idx_w<W and 0<=idx_h<H:
+				if winner_car:
+					map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,215,0])).astype(int))
+				else:
+					map_im_px[idx_w,idx_h]=car_im_px[i,j]
+	return map_im
 
 

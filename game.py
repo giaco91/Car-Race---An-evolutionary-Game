@@ -174,11 +174,15 @@ class Game():
 
 	def max_rounds_race_only_front_sight(self,c_weight=0.8):
 		print('simulate race...')
+		self.scores_of_best_car=[]
+		self.activations_of_best_car=[]
 		for nc in range(self.n_cars):
 			last_c=0
 			c_rot=np.zeros(2)
 			checkpoint_counter=0#first argument is current round, second is the current checkpoint
 			delta=0
+			scores_of_car=[]
+			activations_of_car=[]
 			inputs=np.zeros(self.car_list[nc].n_inputs)
 			smalled_car_size=0.9*self.car_list[nc].size#kosmetik
 			crash=False
@@ -196,6 +200,7 @@ class Game():
 					# print('v_max reached: '+str(self.car_list[nc].v))
 						a=0
 					c=c_weight*self.car_list[nc].get_c(inputs[0::2])+(1-c_weight)*last_c
+					activations_of_car.append([inputs[0::2],self.car_list[nc].get_h(inputs[0::2]),[self.car_list[nc].get_a(inputs[0::2]),self.car_list[nc].get_c(inputs[0::2])]])
 					last_c=c
 					c_rot[0]=-self.orientations[nc][-1][1]
 					c_rot[1]=self.orientations[nc][-1][0]
@@ -240,11 +245,16 @@ class Game():
 						checkpoint_counter+=1
 					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
 						checkpoint_counter-=1
+					scores_of_car.append(checkpoint_counter+delta)
+
 			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
+			if np.argmax(self.scores)==nc:
+				self.scores_of_best_car=scores_of_car.copy()
+				self.activations_of_best_car=activations_of_car.copy()
 			if self.max_frames==0:
 				self.max_frames=self.n_iter
-			self.winner_car=np.argmax(self.scores)
+		self.winner_car=np.argmax(self.scores)
 
 	def max_rounds_race_shape(self,c_weight=0.8,get_data=False):
 		print('simulate race...')
@@ -360,13 +370,14 @@ class Game():
 					if get_data:
 						data_point[3]=checkpoint_counter+delta-score_tracker
 						score_tracker=checkpoint_counter+delta
-					data[nc].append(data_point)
-			data[nc]=data[nc][:-1]
+						data[nc].append(data_point)
+			if get_data:
+				data[nc]=data[nc][:-1]
 			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
 			if self.max_frames==0:
 				self.max_frames=self.n_iter
-			self.winner_car=np.argmax(self.scores)
+		self.winner_car=np.argmax(self.scores)
 		if get_data:
 			return data
 
@@ -418,8 +429,8 @@ class Game():
 					packed_sequences=pack_sequences([[sequence_point]])
 					with torch.no_grad():
 						out_m, out_r, h_last=environment_model(packed_sequences,1,h_init=h_last)
-					# sampled_m,sampled_r=greedy_ml_sampling(out_m,out_r)
-					sampled_m,sampled_r=mode_sampling(out_m,out_r)
+					sampled_m,sampled_r=greedy_ml_sampling(out_m,out_r)
+					# sampled_m,sampled_r=mode_sampling(out_m,out_r)
 					inputs=sampled_m.squeeze().numpy()
 					d_score=sampled_r.squeeze().numpy()
 					input_data[nc].append(inputs)
@@ -570,9 +581,43 @@ class Game():
 					winner_car=True
 				else:
 					winner_car=False
-				pil_f=self.put_on_car(pil_f,np.array([max(0,sc[0]),max(sc[1],0)]),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)
-			frames.append(reflect_y_axis(pil_f))
-		print(len(frames))
+				pil_f=self.put_on_car(pil_f,np.array([max(0,sc[0]),max(sc[1],0)]),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)	
+			#---draw score text
+			draw_ni=min(ni,len(self.scores_of_best_car)-1)
+			pil_f=reflect_y_axis(pil_f)
+			draw=ImageDraw.Draw(pil_f)
+			text=['top score: '+str(self.scores_of_best_car[draw_ni]-0.5)[:4]]
+			dy=0
+			font = ImageFont.truetype("arial.ttf", int(100*imsize/1000))
+			for k in range(len(text)):
+				draw.text((int(0.05*imsize),int(0.05*imsize+dy)), text[k], font=font, fill=(0,0,0))
+				dy+=1.1*font.getsize(text[k])[1]
+			#---- draw neural network
+			dcirc=0.03*imsize
+			for k in range(self.car_list[self.winner_car].n_inputs):
+				activation=min(np.sqrt(self.activations_of_best_car[draw_ni][0][k]),2)/2
+				print(activation)
+				color=(255,int(255*(1-activation)),int(255*(1-activation)))
+				draw.ellipse([(int(0.1*imsize-dcirc),int(0.3*imsize-dcirc+3*k*dcirc)),(int(0.1*imsize+dcirc),int(0.3*imsize+dcirc+3*k*dcirc))], fill=color, outline=(0,0,0))
+			for l in range(self.car_list[nc].n_h):
+				activation=self.activations_of_best_car[draw_ni][1][l]
+				color=(255,int(255*(1-activation)),int(255*(1-activation)))
+				draw.ellipse([(int(0.3*imsize-dcirc),int(0.3*imsize-dcirc+3*l*dcirc)),(int(0.3*imsize+dcirc),int(0.3*imsize+dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
+			for m in range(2):
+				activation=self.activations_of_best_car[draw_ni][2][m]
+				if m==0:
+					text='acceleration='+str(activation)[:4]
+				else:
+					text='curve='+str(activation)[:4]
+				if activation>0:
+					color=(255,int(255*(1-activation)),int(255*(1-activation)))
+				else:
+					color=(int(-255*activation),int(-255*activation),255)
+				draw.ellipse([(int(0.5*imsize-dcirc),int(0.3*imsize-dcirc+3*m*dcirc)),(int(0.5*imsize+dcirc),int(0.3*imsize+dcirc+3*m*dcirc))], fill=color, outline=(0,0,0))
+				font = ImageFont.truetype("arial.ttf", int(70*imsize/1000))
+				draw.text((int(0.5*imsize+3*dcirc),int(0.3*imsize+3*m*dcirc-1*dcirc)), text, font=font, fill=(0,0,0))					
+			frames.append(pil_f)
+		print('amount of frames: '+str(len(frames)))
 		frames[0].save(path,
 		               save_all=True,
 		               append_images=frames[1:],
@@ -616,7 +661,7 @@ class Game():
 				if winner_car:
 					if i==0 or i==w-1 or j==0 or j==h-1:
 						map_im_px[idx_w,idx_h]=(255,215,0)
-				if 10<=sp<750 and 0<=idx_w<W and 0<=idx_h<H:
+				if 10<=sp<700 and 0<=idx_w<W and 0<=idx_h<H:
 					if winner_car:
 						map_im_px[idx_w,idx_h]=tuple((winner_weight*np.asarray(car_im_px[i,j])+(1-winner_weight)*np.array([255,215,0])).astype(int))
 					else:
@@ -630,9 +675,10 @@ class Game():
 		selected_cars=[]
 		mutated_cars=[]
 		mutation_rate=[]
+		mutation_accelerator=10
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
-			mutation_rate.append(mut_fac+50/(1+self.scores[sorted_idx[-1-i]]))
+			mutation_rate.append(mut_fac+mutation_accelerator/(1+self.scores[sorted_idx[-1-i]]))
 
 		print('aerodynamic: '+str(selected_cars[0].aerodynamic))
 		print('size: '+str(selected_cars[0].size))

@@ -37,6 +37,11 @@ np.random.seed(0)
 opt = parser.parse_args()
 print(opt)
 
+
+# img=create_image(200, 200)
+# img.save('cars/car_4.png',format='png')
+# raise ValueError('asdf')
+
 load_car=opt.load_car
 cars=[]
 N_sel=opt.n_sel
@@ -101,7 +106,7 @@ else:
 	for nc in range(0):
 		cars.append(Car(size=0.15,model=1,grip=-0.,v_max=1000,n_inputs=3,n_h=15))
 	for nc in range(n_cars):
-		cars.append(Car(grip=-0.5,n_h=opt.n_h,mutate_physics=True,v_max=1))
+		cars.append(Car(grip=-0.5,model=3,n_h=opt.n_h,mutate_physics=True,v_max=1))
 
 
 
@@ -127,16 +132,16 @@ for g in range(N_gen):
 		data=game.max_rounds_race_shape(get_data=True)
 		game.plot_game(imsize=int(40*np.sqrt(race_map_list[m].size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(m+1)+'.gif',car_shape=True)
 		scores=game.scores
-		plot_car_perspective(data[0],game,game.car_list[0])
-		data=transform_data_to_alpha_and_norm(data)
-		# environment_model, optimizer=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=200,stop_loss=-90)
-		ds_data,input_data,score_data=game.dream(environment_model)
-		game.plot_halucination(ds_data[0][0:90],input_data[0][0:90],score_data[0][0:90],imsize=130,path='gifs/halu.gif',car=game.car_list[0],car_shape=True)
-	# cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=True,mut_fac=1)
+	cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=True,mut_fac=1)
 	scores=np.zeros(n_cars)
+	plot_car_perspective(data[0],game,game.car_list[0])
+	data=transform_data_to_alpha_and_norm(data)
+	train_environment_model(environment_model,optimizer,data,n_epochs=5000,save_path='dream_models/environment_model.pkl',print_every=200,stop_loss=-90)
+	ds_data,input_data,score_data=game.dream(environment_model)
+	game.plot_halucination(ds_data[0][0:90],input_data[0][0:90],score_data[0][0:90],imsize=130,path='gifs/halu.gif',car=game.car_list[0],car_shape=True)
 
-# data=transform_data_to_alpha_and_norm(data)
-# environment_model=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=100,stop_loss=-130)
+data=transform_data_to_alpha_and_norm(data)
+environment_model=train_environment_model(environment_model,optimizer,data,n_epochs=1000,save_path='dream_models/environment_model.pkl',print_every=100,stop_loss=-130)
 
 # game=Game(race_map_list[0],cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
 # ds_data,input_data,score_data=game.dream(environment_model)
