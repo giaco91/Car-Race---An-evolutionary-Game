@@ -568,6 +568,7 @@ class Game():
 		_,_,map_im=self.map.draw_map(imsize=imsize,show=False,border_frac=self.border_frac)
 
 		scale=imsize/(self.map.size-1)
+		imsize*=0.8
 		border=int(scale/self.border_frac)
 		for ni in range(self.max_frames):
 			pil_f=map_im.copy()
@@ -583,6 +584,7 @@ class Game():
 					winner_car=False
 				pil_f=self.put_on_car(pil_f,np.array([max(0,sc[0]),max(sc[1],0)]),self.orientations[nc][ni],self.backward[nc][ni],size_car=int(max(1,self.car_list[nc].size*scale)),path='cars/car_'+str(self.car_list[nc].model)+'.png',winner_car=winner_car,car_shape=car_shape)	
 			#---draw score text
+
 			draw_ni=min(ni,len(self.scores_of_best_car)-1)
 			pil_f=reflect_y_axis(pil_f)
 			draw=ImageDraw.Draw(pil_f)
@@ -612,10 +614,10 @@ class Game():
 				activation=self.activations_of_best_car[draw_ni][1][l]
 				size_fac=(0.5+activation/2)
 				color=(255,int(255*(1-activation)),int(255*(1-activation)))
-				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*l*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+activation*dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
+				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*l*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+size_fac*dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
 			x_coord=0.5*imsize
 			for m in range(2):
-				activation=min(1,max(-1,3*self.activations_of_best_car[draw_ni][2][m]))
+				activation=min(1,max(-1,5*self.activations_of_best_car[draw_ni][2][m]))
 				if m==0:
 					text='force='+str(activation)[:4]
 				else:
@@ -625,19 +627,21 @@ class Game():
 					color=(255,int(255*(1-activation)),int(255*(1-activation)))
 				else:
 					size_fac=(0.5-activation/2)
-					color=(int(-255*activation),int(-255*activation),255)
+					color=(int(255*(1+activation)),int(255*(1+activation)),255)
 				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*m*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+size_fac*dcirc+3*m*dcirc))], fill=color, outline=(0,0,0))
 				font = ImageFont.truetype("arial.ttf", int(70*imsize/1000))
 				draw.text((int(0.5*imsize+3*dcirc),int(0.3*imsize+3*m*dcirc-1.2*dcirc)), text, font=font, fill=(0,0,0))
-
-
 			frames.append(pil_f)
 		print('amount of frames: '+str(len(frames)))
-		frames[0].save(path,
-		               save_all=True,
-		               append_images=frames[1:],
-		               duration=10*self.dt/0.01,
-		               loop=0)
+
+		cv2_list=pil_list_to_cv2(frames)
+		generate_video(cv2_list,path=path,fps=1/self.dt)
+		# raise ValueError('asdf')
+		# frames[0].save(path,
+		#                save_all=True,
+		#                append_images=frames[1::2],
+		#                duration=1000*self.dt,
+		#                loop=0)
 
 	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_1.png',size_car=16,winner_car=False,car_shape=None):
 		position=position.astype(int)
@@ -690,7 +694,7 @@ class Game():
 		selected_cars=[]
 		mutated_cars=[]
 		mutation_rate=[]
-		mutation_accelerator=10
+		mutation_accelerator=50
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
 			mutation_rate.append(mut_fac+mutation_accelerator/(1+self.scores[sorted_idx[-1-i]]))
@@ -709,3 +713,5 @@ class Game():
 			mutated_cars[-1].mutation(mutation_rate=mutation_rate[np.mod(n,N_sel)],shape_mutation=shape_mutation)
 			n+=1
 		return mutated_cars
+
+

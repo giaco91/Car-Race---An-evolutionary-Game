@@ -10,6 +10,8 @@ from PIL import Image,ExifTags,ImageFilter,ImageOps, ImageDraw, ImageFont
 import PIL
 import numpy as np
 import pickle
+import os 
+import cv2 
 
 import matplotlib.pyplot as plt
 
@@ -423,4 +425,44 @@ def put_on_car(map_im,position,orientation,backward,path='cars/car_1.png',size_c
 					map_im_px[idx_w,idx_h]=car_im_px[i,j]
 	return map_im
 
+def pil_list_to_cv2(pil_list):
+	#converts a list of pil images to a list of cv2 images
+	png_list=[]
+	for pil_img in pil_list:
+		pil_img.save('trash_image.png',format='png')
+		png_list.append(cv2.imread('trash_image.png'))
+	os.remove('trash_image.png')
+	return png_list
+
+
+# Video Generating function 
+def generate_video(cv2_list,path='car_race.avi',fps=10): 
+	#makes a video from a given cv2 image list
+	if len(cv2_list)==0:
+		raise ValueError('the given png list is empty!')
+		# image_folder =  '.'# make sure to use your folder 
+	video_name = path
+	# os.chdir("C:\\Python\\Geekfolder2") 
+	# images = [img for img in os.listdir(image_folder) 
+	#           if img.endswith(".jpg") or
+	#              img.endswith(".jpeg") or
+	#              img.endswith("png")] 
+	# Array images should only consider 
+	# the image files ignoring others if any 
+	# print(images)  
+	# frame = cv2.imread(os.path.join(image_folder, images[0]))
+	frame=cv2_list[0] 
+	# setting the frame width, height width 
+	# the width, height of first image 
+	height, width, layers = frame.shape   
+	video = cv2.VideoWriter(video_name, 0, fps, (width, height))  
+	# Appending the images to the video one by one 
+	for cv2_image in cv2_list:  
+	    # video.write(cv2.imread(os.path.join(image_folder, image)))  
+	    video.write(cv2_image) 
+	# Deallocating memories taken for window creation 
+	cv2.destroyAllWindows()  
+	video.release()  # releasing the video generated 
+  
+  
 

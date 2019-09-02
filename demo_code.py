@@ -37,9 +37,39 @@ opt = parser.parse_args()
 print(opt)
 
 
-# img=create_image(200, 200)
-# img.save('cars/car_4.png',format='png')
+# img=create_image(1600, 900)
+# imsize=700
+# draw=ImageDraw.Draw(img)
+# dcirc=0.03*imsize
+# x_coord=0.9*imsize
+# y_coord=0.5*imsize
+# for k in range(3):
+# 	for l in range(2):
+# 		draw.line([(int(x_coord),int(y_coord+3*k*dcirc)),(int(x_coord+0.2*imsize),int(y_coord+3*l*dcirc))],fill=(0,0,0),width=1)
+# for l in range(2):
+# 	for m in range(2):
+# 		draw.line([(int(x_coord+0.2*imsize),int(y_coord+3*l*dcirc)),(int(x_coord+0.4*imsize),int(y_coord+3*m*dcirc))],fill=(0,0,0),width=1)
+# for k in range(3):
+# 	color=(255,100,100)
+# 	size_fac=1
+# 	draw.ellipse([(int(x_coord-size_fac*dcirc),int(y_coord-size_fac*dcirc+3*k*dcirc)),(int(x_coord+size_fac*dcirc),int(y_coord+size_fac*dcirc+3*k*dcirc))], fill=color, outline=(0,0,0))
+# for l in range(2):
+# 	size_fac=1
+# 	color=(255,100,100)
+# 	draw.ellipse([(int(x_coord+0.2*imsize-size_fac*dcirc),int(y_coord-size_fac*dcirc+3*l*dcirc)),(int(x_coord+0.2*imsize+size_fac*dcirc),int(y_coord+size_fac*dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
+# for m in range(2):
+# 	if m==0:
+# 		text='force'
+# 	else:
+# 		text='curve'
+# 	color=(255,100,100)
+# 	size_fac=1
+# 	draw.ellipse([(int(x_coord+0.4*imsize-size_fac*dcirc),int(y_coord-size_fac*dcirc+3*m*dcirc)),(int(x_coord+0.4*imsize+size_fac*dcirc),int(y_coord+size_fac*dcirc+3*m*dcirc))], fill=color, outline=(0,0,0))
+# 	# font = ImageFont.truetype("arial.ttf", int(70*imsize/1000))
+# 	# draw.text((int(0.5*imsize+3*dcirc),int(0.3*imsize+3*m*dcirc-1.2*dcirc)), text, font=font, fill=(0,0,0))
 
+
+# img.save('nn.png',format='png')
 # raise ValueError('asdf')
 
 load_car=opt.load_car
@@ -65,7 +95,7 @@ else:
 # race_map_list=[Map(size=3),Map(size=4),Map(size=5),Map(size=6),Map(size=7),Map(size=8)]
 # race_map_list=[Map(size=4),Map(size=4),Map(size=4),Map(size=4),Map(size=4)]
 race_map_list=[]
-n_race_maps=15
+n_race_maps=20
 size=opt.map_size
 if size>=5:
 	min_points=20
@@ -96,9 +126,10 @@ for j in range(len(race_map_list)):
 
 
 
+# race_map_list[-13].draw_map(imsize=500,show=True)
+# raise ValueError('asdf')
+# race_map_list[0]=race_map_list[-13]
 
-
-race_map_list[0]=race_map_list[-5]
 
 #load
 if load_car:
@@ -113,7 +144,7 @@ else:
 	for nc in range(0):
 		cars.append(Car(size=0.15,model=1,grip=-0.,v_max=1000,n_inputs=3,n_h=15))
 	for nc in range(n_cars):
-		cars.append(Car(grip=-0.5,model=3,n_h=opt.n_h,n_inputs=3,mutate_physics=False,v_max=1,size=0.15))
+		cars.append(Car(grip=-1,model=3,n_h=opt.n_h,n_inputs=3,mutate_physics=False,v_max=2,size=0.15,F_max=2000))
 
 
 def get_inputs(orientation,position,map):
@@ -193,18 +224,21 @@ car_shape=True
 # 		dy+=1.1*font.getsize(text[k])[1]
 # 	pil_f.save('video_figures/images/car_measure_'+str(i)+'.png',format='png')
 
-scores=np.zeros(n_cars)
 race_map=race_map_list[0]
+old_score=0
 for g in range(N_gen):
 	print('Race: '+str(g+1))
 	game=Game(race_map,cars,dt=opt.dt,n_iter=opt.n_iter,save_path=save_path)
-	game.scores=scores
 	game.max_rounds_race_only_front_sight()
 	# game.max_rounds_race_shape()
-	game.plot_game(imsize=int(50*np.sqrt(race_map.size)),path='gifs/shape_generation='+str(g+1)+'_map='+str(opt.map_size)+'.gif',car_shape=car_shape)
-	scores=game.scores
+	# print(game.scores)
+	best_score=np.max(game.scores)
+	print(best_score)
+	if g%2==0 and old_score<best_score:
+		game.plot_game(imsize=int(180*np.sqrt(race_map.size)),path='gifs/shape_generation='+str(g+10+1)+'_map='+str(opt.map_size)+'_nh='+str(opt.n_h)+'.avi',car_shape=car_shape)
+		old_score=best_score
+
 	cars=game.selection_and_mutation(N_sel,N_mut,shape_mutation=False,mut_fac=1)
-	scores=np.zeros(n_cars)
 
 
 
