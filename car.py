@@ -24,12 +24,10 @@ class Car():
 		self.size=size
 		self.aerodynamic=aerodynamic
 		self.a_max=F_max/m
+		self.v_max=v_max
+		self.grip=grip#smaller or equal zero. zero is perfect grip. -1 is not good grip
 		if mutate_physics:
-			self.v_max=v_max*(np.random.rand(1)+0.5)
-			self.grip=grip*(np.random.rand(1)+0.5)
-		else:
-			self.v_max=v_max
-			self.grip=grip#smaller or equal zero. zero is perfect grip. -1 is not good grip
+			self.shape_mutation(mutation_rate=1.2)
 		self.n_inputs=n_inputs
 		self.n_h=n_h
 		self.backward=backward#the capability to drive backward compared to forward
@@ -39,23 +37,28 @@ class Car():
 
 	def mutation(self,mutation_rate=1,shape_mutation=False):
 		#mutation_rate can be any positive number
-		self.a_weights+=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
-		self.c_weights+=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
-		self.h_weights+=(np.random.rand(self.n_inputs+2,self.n_h)-0.5)*mutation_rate/self.n_h
+		#bias towards small parameter in order to counteract evolutionary drift into flat regions (sigmoid activations...)
+		da=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
+		self.a_weights+=da*np.maximum(np.exp(-0.5*np.abs(self.a_weights)),-np.sign(self.a_weights*da))
+		dc=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
+		self.c_weights+=dc*np.maximum(np.exp(-0.5*np.abs(self.c_weights)),-np.sign(self.c_weights*dc))
+		dh=(np.random.rand(self.n_inputs+2,self.n_h)-0.5)*mutation_rate/self.n_h
+		self.h_weights+=dh*np.maximum(np.exp(-0.5*np.abs(self.h_weights)),-np.sign(self.h_weights*dh))
 		# print(np.linalg.norm(self.a_weights))
 		# print(np.linalg.norm(self.c_weights))
 		if shape_mutation:
 			self.shape_mutation()
 
-	def shape_mutation(self,mutation_rate=1):
-		fac=np.random.rand(2)/5+0.9
-		self.grip=min(0,self.grip*fac[0])
+	def shape_mutation(self,mutation_rate=1.2):
+		#mutationrate must be larger than one
+		fac=np.random.rand(2)*(mutation_rate-1/mutation_rate)+1/mutation_rate
+		self.grip=max(min(0,self.grip*fac[0]),-2)
 		self.v_max=max(0,self.v_max*fac[1])
 		self.transform_shape()
 
 
 	def transform_shape(self):
-		self.size=max(0.01,0.2*self.grip+0.3+self.v_max/100)
+		self.size=0.1*self.grip+0.2+self.v_max/10
 		self.aerodynamic=1+self.v_max**2
 		self.m=200+self.size/0.01
 		self.F_max=1000*np.sqrt(self.aerodynamic)

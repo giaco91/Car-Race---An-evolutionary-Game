@@ -1,5 +1,5 @@
-import torch
-from torch.autograd import Variable
+# import torch
+# from torch.autograd import Variable
 import sys
 from copy import deepcopy
 
@@ -261,6 +261,8 @@ class Game():
 		self.positions=[]
 		self.orientations=[]
 		self.backward=[]
+		self.scores_of_best_car=[]
+		self.activations_of_best_car=[]
 		self.scores=np.zeros(self.n_cars)
 		self.max_frames=0
 		self.winner_car=None
@@ -278,6 +280,8 @@ class Game():
 				data[nc][0][0:3]=inputs[0::2]#we implicitely assume that the first measurment was measured twice, once in the zero step round
 				score_tracker=self.positions[nc][0][0]
 			self.car_list[nc].transform_shape()
+			scores_of_car=[]
+			activations_of_car=[]
 			last_c=0
 			c_rot=np.zeros(2)
 			checkpoint_counter=0#first argument is current round, second is the current checkpoint
@@ -304,6 +308,7 @@ class Game():
 						a=0
 					c=c_weight*self.car_list[nc].get_c(inputs[0::2])+(1-c_weight)*last_c
 					last_c=c
+					activations_of_car.append([inputs[0::2],self.car_list[nc].get_h(inputs[0::2]),[self.car_list[nc].get_a(inputs[0::2]),self.car_list[nc].get_c(inputs[0::2])]])
 					c_rot[0]=-self.orientations[nc][-1][1]
 					c_rot[1]=self.orientations[nc][-1][0]
 
@@ -367,14 +372,19 @@ class Game():
 						checkpoint_counter+=1
 					elif np.mod(checkpoint_counter-1,self.n_checkpoints)==checkpoint:
 						checkpoint_counter-=1
+					scores_of_car.append(checkpoint_counter+delta)
 					if get_data:
 						data_point[3]=checkpoint_counter+delta-score_tracker
 						score_tracker=checkpoint_counter+delta
 						data[nc].append(data_point)
-			if get_data:
-				data[nc]=data[nc][:-1]
+
 			self.scores[nc]+=checkpoint_counter+delta
 			self.car_list[nc].v=0
+			if np.argmax(self.scores)==nc:
+				self.scores_of_best_car=scores_of_car.copy()
+				self.activations_of_best_car=activations_of_car.copy()
+			if get_data:
+				data[nc]=data[nc][:-1]
 			if self.max_frames==0:
 				self.max_frames=self.n_iter
 		self.winner_car=np.argmax(self.scores)
@@ -562,7 +572,7 @@ class Game():
 		               loop=0)
 
 				
-	def plot_game(self,path='car_race.gif',imsize=256,car_shape=False):
+	def plot_game(self,path='car_race.gif',imsize=256,car_shape=False,take_frame_every=2):
 		print('rendering ...')
 		frames=[]
 		_,_,map_im=self.map.draw_map(imsize=imsize,show=False,border_frac=self.border_frac)
@@ -635,13 +645,16 @@ class Game():
 		print('amount of frames: '+str(len(frames)))
 
 		cv2_list=pil_list_to_cv2(frames)
-		generate_video(cv2_list,path=path,fps=1/self.dt)
-		# raise ValueError('asdf')
-		# frames[0].save(path,
-		#                save_all=True,
-		#                append_images=frames[1::2],
-		#                duration=1000*self.dt,
-		#                loop=0)
+		if path[-3:]=='avi':
+			generate_video(cv2_list,path=path,fps=1/self.dt)
+		elif path[-3:]=='gif':
+			frames[0].save(path,
+			               save_all=True,
+			               append_images=frames[1::take_frame_every],
+			               duration=1000*self.dt,
+			               loop=0)
+		else:
+			raise ValueError('the given video path must have the ending: gif or avi')
 
 	def put_on_car(self,map_im,position,orientation,backward,path='cars/car_1.png',size_car=16,winner_car=False,car_shape=None):
 		position=position.astype(int)
@@ -701,6 +714,8 @@ class Game():
 
 		print('aerodynamic: '+str(selected_cars[0].aerodynamic))
 		print('size: '+str(selected_cars[0].size))
+		print('grip: '+str(selected_cars[0].grip))
+		print('v_max: '+str(selected_cars[0].v_max))		
 		with open(self.save_path, 'wb') as f:
 			pickle.dump(selected_cars[0], f )	
 

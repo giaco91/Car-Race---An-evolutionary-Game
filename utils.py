@@ -1,7 +1,7 @@
-import torch
-import torch.nn as nn
-import torchvision
-from torch.nn import functional as F
+# import torch
+# import torch.nn as nn
+# import torchvision
+# from torch.nn import functional as F
 import sys
 from copy import deepcopy
 import math
@@ -440,17 +440,7 @@ def generate_video(cv2_list,path='car_race.avi',fps=10):
 	#makes a video from a given cv2 image list
 	if len(cv2_list)==0:
 		raise ValueError('the given png list is empty!')
-		# image_folder =  '.'# make sure to use your folder 
 	video_name = path
-	# os.chdir("C:\\Python\\Geekfolder2") 
-	# images = [img for img in os.listdir(image_folder) 
-	#           if img.endswith(".jpg") or
-	#              img.endswith(".jpeg") or
-	#              img.endswith("png")] 
-	# Array images should only consider 
-	# the image files ignoring others if any 
-	# print(images)  
-	# frame = cv2.imread(os.path.join(image_folder, images[0]))
 	frame=cv2_list[0] 
 	# setting the frame width, height width 
 	# the width, height of first image 
@@ -458,7 +448,6 @@ def generate_video(cv2_list,path='car_race.avi',fps=10):
 	video = cv2.VideoWriter(video_name, 0, fps, (width, height))  
 	# Appending the images to the video one by one 
 	for cv2_image in cv2_list:  
-	    # video.write(cv2.imread(os.path.join(image_folder, image)))  
 	    video.write(cv2_image) 
 	# Deallocating memories taken for window creation 
 	cv2.destroyAllWindows()  
