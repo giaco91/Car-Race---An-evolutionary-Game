@@ -38,7 +38,7 @@ opt = parser.parse_args()
 print(opt)
 
 #set seed for reproducability
-np.random.seed(0)
+np.random.seed(1)
 
 if opt.avi:
 	video_ending='.avi'
@@ -67,7 +67,7 @@ if opt.load_car:
 	    	cars[-1].mutation(shape_mutation=opt.shape_mutation)
 else:
 	for nc in range(opt.n_mut):
-		cars.append(Car(grip=-1,model=opt.model,n_h=opt.n_h,n_inputs=3,mutate_physics=opt.shape_mutation,v_max=1,size=0.15,F_max=2000))
+		cars.append(Car(grip=-1,model=opt.model,n_h=opt.n_h,n_inputs=3,mutate_physics=opt.shape_mutation,v_max=0.5,F_max=2000))
 
 #---make directionries ---
 if not os.path.exists(opt.save_path):

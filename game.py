@@ -627,7 +627,11 @@ class Game():
 				draw.ellipse([(int(x_coord-size_fac*dcirc),int(0.3*imsize-size_fac*dcirc+3*l*dcirc)),(int(x_coord+size_fac*dcirc),int(0.3*imsize+size_fac*dcirc+3*l*dcirc))], fill=color, outline=(0,0,0))
 			x_coord=0.5*imsize
 			for m in range(2):
-				activation=min(1,max(-1,5*self.activations_of_best_car[draw_ni][2][m]))
+				if m==0:
+					activation_scale=1
+				else:
+					activation_scale=10
+				activation=min(10,max(-10,activation_scale*self.activations_of_best_car[draw_ni][2][m]))
 				if m==0:
 					text='force='+str(activation)[:4]
 				else:
@@ -707,7 +711,7 @@ class Game():
 		selected_cars=[]
 		mutated_cars=[]
 		mutation_rate=[]
-		mutation_accelerator=50
+		mutation_accelerator=60
 		for i in range(N_sel):
 			selected_cars.append(self.car_list[sorted_idx[-1-i]])
 			mutation_rate.append(mut_fac+mutation_accelerator/(1+self.scores[sorted_idx[-1-i]]))

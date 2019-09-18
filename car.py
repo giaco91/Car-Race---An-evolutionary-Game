@@ -28,6 +28,8 @@ class Car():
 		self.grip=grip#smaller or equal zero. zero is perfect grip. -1 is not good grip
 		if mutate_physics:
 			self.shape_mutation(mutation_rate=1.2)
+		else:
+			self.shape_mutation(mutation_rate=1)
 		self.n_inputs=n_inputs
 		self.n_h=n_h
 		self.backward=backward#the capability to drive backward compared to forward
@@ -39,11 +41,11 @@ class Car():
 		#mutation_rate can be any positive number
 		#bias towards small parameter in order to counteract evolutionary drift into flat regions (sigmoid activations...)
 		da=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
-		self.a_weights+=da*np.maximum(np.exp(-0.5*np.abs(self.a_weights)),-np.sign(self.a_weights*da))
+		self.a_weights+=da*np.maximum(np.exp(-0.1*np.abs(self.a_weights)),-np.sign(self.a_weights*da))
 		dc=(np.random.rand(self.n_h+1)-0.5)*0.1*mutation_rate
-		self.c_weights+=dc*np.maximum(np.exp(-0.5*np.abs(self.c_weights)),-np.sign(self.c_weights*dc))
+		self.c_weights+=dc*np.maximum(np.exp(-0.1*np.abs(self.c_weights)),-np.sign(self.c_weights*dc))
 		dh=(np.random.rand(self.n_inputs+2,self.n_h)-0.5)*mutation_rate/self.n_h
-		self.h_weights+=dh*np.maximum(np.exp(-0.5*np.abs(self.h_weights)),-np.sign(self.h_weights*dh))
+		self.h_weights+=dh*np.maximum(np.exp(-0.1*np.abs(self.h_weights)),-np.sign(self.h_weights*dh))
 		# print(np.linalg.norm(self.a_weights))
 		# print(np.linalg.norm(self.c_weights))
 		if shape_mutation:
@@ -58,7 +60,7 @@ class Car():
 
 
 	def transform_shape(self):
-		self.size=0.1*self.grip+0.2+self.v_max/10
+		self.size=0.2*self.grip+0.4+self.v_max/10
 		self.aerodynamic=1+self.v_max**2
 		self.m=200+self.size/0.01
 		self.F_max=1000*np.sqrt(self.aerodynamic)
